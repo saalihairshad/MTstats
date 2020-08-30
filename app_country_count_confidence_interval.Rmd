@@ -1,0 +1,178 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+### Install the packages ###
+```{r}
+install.packages("mongolite")
+install.packages("rmongodb")
+install.packages("irr")
+install.packages("jsonlite")
+```
+
+
+### Include the packages ###
+```{r}
+library(mongolite)
+library(tidyverse)
+library(dplyr)
+library(jsonlite)
+library(tidyr)
+library(plyr)
+```
+
+### Connect to the DB ###
+```{r}
+# Connect to the database and the desired collection as root:
+db <- mongo(collection = "all_app_tweets_replies_4", db = "tweet_db", url = "mongodb://localhost:27017/")
+
+# Perform a query and retrieve data
+out <- db$find('{"app_name": "AdobeCare", "country":"United States"}')
+out
+```
+
+
+
+```{r}
+# Read the desired documents i.e. Tweets inside one dataframe:
+documents <- db$find(fields = '{ "_id" : false, "app_name" : true, "country": true }')
+documents$country
+x = data_frame(app=documents$app, country=documents$country)
+
+x
+```
+
+
+```{r}
+a <- spread(counts, "App", Freq)
+a
+```
+
+
+```{r}
+# Omit NA values
+omitttedValues <- na.omit(a)
+omitttedValues
+```
+
+
+
+```{r}
+#Select specific rows
+
+df<- omitttedValues %>% filter(Country == "United States" | Country =="United Kingdom" | Country == "India" | Country == "Canada" | Country == "Australia"  | Country == "Germany" | Country == "Netherlands" | Country == "France")
+df
+```
+
+
+```{r}
+# Order by in descending based on snapchatsupport
+
+df <- df[order(-df$SpotifyCares),] 
+df
+```
+ 
+
+```{r}
+# Drop MSONENOTE
+
+df = select(df, -msonenote)
+df
+```
+
+
+
+```{r}
+file1 = write.csv(df,"original_count.csv")
+```
+
+```{r}
+df$rowSum = apply(df[,-1], 1, sum)
+file2 = write.csv(df,"with_row_totals.csv")
+```
+
+
+### Calculate Confidence Interval
+```{r}
+sample.size = function(c.lev=95, margin=.5,
+                       c.interval=.05, population) {
+  z.val = qnorm(.5+c.lev/200)
+  ss = (z.val^2 * margin * (1-margin))/c.interval^2
+  p.ss = round((ss/(1 + ((ss-1)/population))), digits=0)
+  METHOD = paste("Recommended sample size for a population of ",
+                 population, " at a ", c.lev,
+                 "% confidence level", sep = "")
+  structure(list(Population = population,
+                 "Confidence level" = c.lev,
+                 "Margin of error" = c.interval,
+                 "Response distribution" = margin,
+                 "Recommended sample size" = p.ss,
+                 method = METHOD),
+            class = "power.htest")
+}
+```
+
+```{r}
+
+values <- df[, "AdobeCare"] 
+values
+sample.size(population = values[1:8] )
+```
+
+
+
+```{r}
+df <- df %>%  bind_rows(summarise_all(., funs(if(is.numeric(.)) sum(.) else "Total")))
+df
+```
+
+```{r}
+df$rowSum = apply(df[,-1], 1, sum)
+df
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
