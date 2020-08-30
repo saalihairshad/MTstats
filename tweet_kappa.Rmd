@@ -1,0 +1,132 @@
+---
+title: "Tweet Cohen's Kappa"
+output: html_notebook
+---
+
+
+```{r}
+
+library(mongolite)
+library(tidyverse)
+library(dplyr)
+library(irr)
+library(jsonlite)
+
+library(KappaGUI)
+```
+
+
+```{r}
+# Connect to the database and the desired collection as root:
+db <- mongo(collection = "all", db = "analysis", url = "mongodb://localhost:27017/")
+df<- db$find()
+
+#count observations
+#df
+
+df <- df$annotations
+glimpse(df)
+
+options(max.print=999999)
+df <- db$find()
+df <- df$annotations
+df <- df %>% flatten()
+#df
+# df$"5e9b09533323ee00179721dc.annotations.type.noise"
+# df$"5e98d39beb79630017138ac3.annotations.type.noise"
+#df$isPending
+```
+
+
+# Cohen's kappa for content categories
+```{r}
+
+# Select columns of the dataframe
+bugReport <- select(df, '5e9b09533323ee00179721dc.annotations.type.bugReport', '5e98d39beb79630017138ac3.annotations.type.bugReport')
+bugReportKappa <- kappa2(bugReport)
+
+
+supportRequest <- select(df, '5e9b09533323ee00179721dc.annotations.type.supportRequest', '5e98d39beb79630017138ac3.annotations.type.supportRequest')
+supportRequestKappa <- kappa2(supportRequest)
+
+
+featureRequest <- select(df, '5e9b09533323ee00179721dc.annotations.type.featureRequest', '5e98d39beb79630017138ac3.annotations.type.featureRequest')
+featureRequestKappa <- kappa2(featureRequest)
+
+
+noise <- select(df, '5e9b09533323ee00179721dc.annotations.type.noise', '5e98d39beb79630017138ac3.annotations.type.noise')
+noiseKappa <- kappa2(noise)
+
+
+other <- select(df, '5e9b09533323ee00179721dc.annotations.type.other', '5e98d39beb79630017138ac3.annotations.type.supportRequest')
+otherkappa <- kappa2(other)
+
+
+
+#create list with cohen's kappa of content categories
+#noiseKappa$value
+contentcategory <- c(bugReportKappa$value, supportRequestKappa$value, featureRequestKappa$value, noiseKappa$value, otherkappa$value )
+#contentcategory <- c(bugReportKappa$value, supportRequestKappa$value, featureRequestKappa$value, otherkappa$value )
+
+#contentcategory
+
+# Calculate content category mean
+Meancontentcategory <- mean(contentcategory)
+
+Meancontentcategory
+```
+
+#Cohen's kappa for sentiment
+```{r}
+
+Sentiment <- select(df, '5e9b09533323ee00179721dc.annotations.sentiment', '5e98d39beb79630017138ac3.annotations.sentiment')
+
+Sentimentkappa <- kappa2(Sentiment)
+Sentimentkappa
+```
+
+#Cohen's kappa for gender
+```{r}
+Gender <- select(df, '5e9b09533323ee00179721dc.annotations.gender', '5e98d39beb79630017138ac3.annotations.gender')
+
+Genderkappa <- kappa2(Gender)
+Genderkappa
+```
+
+# Total Kappas
+```{r}
+#List all kappas
+
+kappas <- c(Meancontentcategory, Sentimentkappa$value, Genderkappa$value)
+
+#Calculate the mean kappa
+
+meankappa <- mean(kappas)
+meankappa
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
