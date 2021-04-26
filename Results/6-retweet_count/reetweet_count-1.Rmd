@@ -1,0 +1,732 @@
+---
+output:
+  html_notebook: 
+    number_sections: yes
+  title: "Retweet Favorites Replies Count Analysis"
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+
+```{r}
+knitr::opts_chunk$set(echo = T)
+```
+
+
+```{r}
+library(mongolite)
+library(tidyverse)
+library(dplyr)
+library(irr)
+library(jsonlite)
+library(ggpubr)
+library(stringi)
+library(qdap)
+library(cld2)
+library(plyr)
+library(e1071)
+library("xlsx")
+library(PMCMRplus)
+
+#import MongoDB collection into R
+db <- mongo(
+  collection = "final1",
+  db = "analysis",
+  url = "mongodb://localhost:27017/",
+  verbose = FALSE,
+  options = ssl_options()
+)
+
+#count observations
+
+db$count()
+
+# put environment into proper dataset - makes it easy to get an overview of nested table
+df <- db$find('{}')
+
+#take a quick look into the dataset
+#glimpse(df)
+
+# Flatten table
+datacomplete <- df %>% flatten()
+
+
+#Remove noise
+datacomplete1<-datacomplete[!(datacomplete$finalannotationcontentcategory=="Noise"),]
+
+
+# select only important columns from full dataset and save into a new data frame
+# my_data <- as_tibble(datacomplete)
+final_data <- datacomplete1 %>% select(retweet_count, favorite_count, app_name, country_code, country, content_category = finalannotationcontentcategory, sentiment = finalannotationsentiment, gender = finalannotationgender, created_at, text = full_text, replies)
+
+final_data$country <- as.factor(final_data$country)
+final_data
+
+#data <- source('/Movies/descriptiveStatsSal/Results/load_data.r')
+```
+
+
+```{r}
+rt <- final_data %>% 
+        select(country, retweet_count, favorite_count) 
+rt$retweets <- rt$retweet_count
+rt$favorites <- rt$favorite_count
+#rt$retweets2 <- rt$retweet_count
+rt
+```
+
+
+```{r}
+j=0
+
+for (j in 1:(nrow(rt))) {
+  if(rt[j, 4] > 1) {
+    rt[j, 4] <- "yes"
+  } else
+     rt[j, 4] <- "no"
+}
+
+for (j in 1:(nrow(rt))) {
+  if(rt[j, 5] > 1) {
+    rt[j, 5] <- "yes"
+  } else
+     rt[j, 5] <- "no"
+}
+
+# for (j in 1:(nrow(rt))) {
+#   if(rt[j, 4] > 0) {
+#     rt[j, 4] <- 1
+#   } else
+#      rt[j, 4] <- 0
+# }
+
+
+
+rt
+
+```
+
+
+###
+```{r}
+count(rt, vars = c("retweets"))
+count(rt, vars = c("country","retweets"))
+```
+
+
+```{r}
+df <- rt %>%select(country, retweets, favorites) 
+
+df
+```
+
+
+# ==== Retweets ====
+
+```{r}
+# mycolor <- c("#fbb4b9", "#fdcdac", "#a6cee3", "#76BFF1")
+# 
+# 
+# #barchart for content category
+#  #c4 = c(#76BFF1", "#ff6384", "#FFDD8A", "#5ADB94")
+#  ggplot(data = rt) +
+#    aes(x = country, fill = retweets) +
+#   scale_x_discrete(guide = guide_axis(n.dodge=2)) +
+#   geom_bar(position = "dodge") + 
+#   labs(y="Retweet Count", x = "Countries" ) +
+#    scale_fill_manual(values = alpha(c("#ff6384", "#5ADB94"), 0.4)) +
+#  #  scale_y_continuous(labels = scales::percent_format()) +
+#   guides(x = guide_axis(angle = 90)) +theme_bw()
+```
+
+
+### Get counts of retweets
+```{r}
+retweets_df <- df
+
+retweets_df <- data.frame(df$country, df$retweets)
+colnames(retweets_df)<- c("country", "retweets")
+
+
+retweets_df <- retweets_df %>% group_by(country, retweets) %>%
+  add_count(country)  %>%
+  distinct()
+
+colnames(retweets_df)<- c("country", "retweets", "count")
+retweets_df
+
+
+```
+
+
+```{r}
+p <- ggplot(retweets_df, aes(x = country, y = count)) +
+  geom_col(aes(color = retweets, fill = retweets), position = position_dodge(0.8), width = 0.7, size = 0.3, alpha = 0.4) +
+  geom_text(
+  aes(label = count, group = retweets), 
+  position = position_dodge(0.8),
+  vjust = -0.3, size = 3
+) +
+  theme_minimal()+
+  labs(x="Country", y="Retweet Count", title = "") +
+  theme(legend.position = "right", axis.text.x = element_text(angle = 90, hjust = 0.5)) 
+p
+```
+
+
+### Barplot of retweets
+```{r}
+
+p <- ggplot(data = retweets_df, aes(x = country, 
+                          y=count, 
+                          fill = retweets)) 
+p <- p + geom_bar(stat="identity",
+             position = "fill",
+             width = 0.6,
+             color = "#333333",
+             size = 0.3,
+             alpha = 0.4)+
+  theme_minimal()+
+  theme(legend.position = "right", axis.text.x = element_text(angle = 90, hjust = 0.8))+
+  labs(x="Country", y="Total Count", title = "Retweet Count by Country") +
+  geom_text(aes(label=count), position = position_fill(vjust = 0.5), size=3) +
+  labs(fill = "retweets")
+
+p
+
+```
+
+
+
+### Chi Square ---- Retweets 
+<span style="color:red">Not Significant</span>
+
+```{r}
+rt_tb <- table(df$country,df$retweets)
+rt_tb 
+chisq_rt <- chisq.test(rt_tb, simulate.p.value = TRUE)
+chisq_rt
+```
+
+
+
+
+# ====Favorites ====
+
+### Get counts of favorites
+```{r}
+fv_df <- df
+
+fv_df <- data.frame(df$country, df$favorites)
+colnames(fv_df)<- c("country", "favorites")
+
+
+fv_df <- fv_df %>% group_by(country, favorites) %>%
+  add_count(country)  %>%
+  distinct()
+
+colnames(fv_df)<- c("country", "favorites", "count")
+fv_df
+
+
+```
+
+
+
+```{r}
+p <- ggplot(fv_df, aes(x = country, y = count)) +
+  geom_col(aes(color = favorites, fill = favorites), position = position_dodge(0.8), width = 0.7, size = 0.3, alpha = 0.4) +
+  geom_text(
+  aes(label = count, group = favorites), 
+  position = position_dodge(0.8),
+  vjust = -0.3, size = 3
+) +
+  theme_minimal()+
+  labs(x="Country", y="Favorite Count", title = "Favorite Count by Country") +
+  theme(legend.position = "right", axis.text.x = element_text(angle = 90, hjust = 0.5)) 
+p
+```
+
+### Barplot of favorites
+```{r}
+
+p <- ggplot(data = fv_df, aes(x = country, 
+                          y=count, 
+                          fill = favorites)) 
+p <- p + geom_bar(stat="identity",
+             position = "fill",
+             width = 0.6,
+             color = "#333333",
+             size = 0.3,
+             alpha = 0.4)+
+  theme_minimal()+
+  theme(legend.position = "right", axis.text.x = element_text(angle = 90, hjust = 0.8))+
+  labs(x="Country", y="Total Count", title = "Content Categories Count by Country") +
+  geom_text(aes(label=count), position = position_fill(vjust = 0.5), size=3) +
+  labs(fill = "favorites")
+
+p
+
+```
+
+
+### Chi Square --- favorites
+<span style="color:red">Not Significant</span>
+
+```{r}
+fv_tb <- table(df$country, df$favorites)
+fv_tb 
+chisq_fv <- chisq.test(fv_tb)
+chisq_fv
+```
+
+# ==== Replies Count ====
+
+```{r}
+library(readxl)
+rp <- read_excel("a2.xlsx")
+#rp$reply_ranks <- as.integer(rp$reply_ranks)
+rp
+
+```
+
+
+
+### Get counts of reply
+```{r}
+rp_df <- rp
+
+rp_df <- data.frame(rp$country, rp$reply)
+colnames(rp_df)<- c("country", "reply")
+
+
+rp_df <- rp_df %>% group_by(country, reply) %>%
+  add_count(country)  %>%
+  distinct()
+
+colnames(fv_df)<- c("country", "reply", "reply_count")
+rp_df
+
+
+```
+
+```{r}
+p <- ggplot(rp_df, aes(x = country, y = n)) +
+  geom_col(aes(color = reply, fill = reply), position = position_dodge(0.8), width = 0.7, size = 0.3, alpha = 0.4) +
+  geom_text(
+  aes(label = n, group = reply), 
+  position = position_dodge(0.8),
+  vjust = -0.3, size = 3
+) +
+  theme_minimal()+
+  labs(x="Country", y="Retweet Count", title = "") +
+  theme(legend.position = "right", axis.text.x = element_text(angle = 90, hjust = 0.5)) 
+p
+```
+
+
+
+### Barplot of retweets
+```{r}
+
+p <- ggplot(data = rp_df, aes(x = country, 
+                          y=n, 
+                          fill = reply)) 
+p <- p + geom_bar(stat="identity",
+             position = "fill",
+             width = 0.6,
+             color = "#333333",
+             size = 0.3,
+             alpha = 0.4)+
+  theme_minimal()+
+  theme(legend.position = "right", axis.text.x = element_text(angle = 90, hjust = 0.8))+
+  labs(x="Country", y="Total Count", title = "Content Categories Count by Country") +
+  geom_text(aes(label=n), position = position_fill(vjust = 0.5), size=3) +
+  labs(fill = "reply")
+
+p
+
+```
+
+
+### Chi Square ---- replies
+<span style="color:green">Significant</span>
+
+
+```{r}
+rp_tb <- table(rp$country, rp$reply)
+rp_tb 
+chisq_rp <- chisq.test(rp_tb)
+chisq_rp
+```
+
+<span style="color:green">
+Only these 3 pairs differ
+  <li>India : Netherlands</li>
+  <li>Netherlands : United Kingdom</i>
+  <li>France : India</li>
+</span>
+
+```{r}
+library(rcompanion)
+options(scipen = 99999)
+
+reply_posthoc <- pairwiseNominalIndependence(rp_tb,
+                            fisher = FALSE,
+                            gtest  = FALSE,
+                            chisq  = TRUE,
+                            method = "bonferroni")
+reply_posthoc
+```
+
+```{r}
+#typeof(xx)
+write.xlsx2(reply_posthoc, 'reply_1.xlsx', sheetName = "Sheet1",
+  col.names = TRUE, row.names = TRUE, append = FALSE)
+```
+
+
+
+
+
+
+
+```{r}
+library(corrplot)
+#png(height=500, width=500, pointsize=15, file="overlap.png")
+corrplot(chisq_rp$residuals, is.cor = FALSE, mar = c(0,0,1,0), tl.cex = 0.8, method="circle",type="full",cl.ratio = 0.6, cl.align = "r", cl.offset =  0.14, )
+
+```
+
+
+# ===== CULTURE ====
+```{r}
+culture_df_reply <- rp %>% 
+        select(country, reply, reply_ranks) 
+
+culture_df_reply
+```
+
+
+
+###Prepare cultural groups with low and high### 
+```{r}
+final_data_culture <- culture_df_reply
+
+final_data_culture$culturegroup <- NA
+final_data_culture$PD <- NA
+final_data_culture$IDVI <- NA
+final_data_culture$MA <- NA
+final_data_culture$UA <- NA
+final_data_culture$LTO <- NA
+final_data_culture$INDU <- NA
+i=0
+
+for (i in 1:(nrow(final_data_culture))) {
+  if (final_data_culture$country[i] == "Australia") {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "high"
+    final_data_culture$LTO[i] <- "low"
+    final_data_culture$INDU[i] <- "high"
+    
+  } else if (final_data_culture$country[i] == "Canada" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "low"
+    final_data_culture$LTO[i] <- "low"
+    final_data_culture$INDU[i] <- "high"
+
+  } else if (final_data_culture$country[i]== "France" ) {
+    final_data_culture$PD[i] <- "high"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "low"
+    final_data_culture$UA[i] <- "high"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "low"
+
+  } else if (final_data_culture$country[i] == "Germany" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "high"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "low"
+
+  } else if (final_data_culture$country[i] == "India" ) {
+    final_data_culture$PD[i] <- "high"
+    final_data_culture$IDVI[i] <- "low"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "low"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "low"
+
+  }  else if (final_data_culture$country[i] == "Netherlands" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "low"
+    final_data_culture$UA[i] <- "high"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "high"
+
+  }  else if (final_data_culture$country[i] == "United Kingdom" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "low"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "high"
+
+    
+  } else if (final_data_culture$country[i] == "United States" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "low"
+    final_data_culture$LTO[i] <- "low"
+    final_data_culture$INDU[i] <- "high"
+
+  } 
+}
+
+
+###Prepare cultural groups with original scores### 
+
+final_data_culture$PD1 <- NA
+final_data_culture$IDVI1 <- NA
+final_data_culture$MA1 <- NA
+final_data_culture$UA1 <- NA
+final_data_culture$LTO1 <- NA
+final_data_culture$INDU1 <- NA
+i=0
+
+for (i in 1:(nrow(final_data_culture))) {
+  if (final_data_culture[i,1] == "Australia") {
+    final_data_culture$PD1[i] <- 38
+    final_data_culture$IDVI1[i] <- 90
+    final_data_culture$MA1[i] <- 61
+    final_data_culture$UA1[i] <- 51
+    final_data_culture$LTO1[i] <- 21
+    final_data_culture$INDU1[i] <- 71
+    
+  } else if (final_data_culture[i,1] == "Canada" ) {
+    final_data_culture$PD1[i] <- 39
+    final_data_culture$IDVI1[i] <- 80
+    final_data_culture$MA1[i] <- 52
+    final_data_culture$UA1[i] <- 48
+    final_data_culture$LTO1[i] <- 36
+    final_data_culture$INDU1[i] <- 68
+
+  } else if (final_data_culture[i,1] == "France" ) {
+     final_data_culture$PD1[i] <- 68
+    final_data_culture$IDVI1[i] <- 71
+    final_data_culture$MA1[i] <- 43
+    final_data_culture$UA1[i] <- 86
+    final_data_culture$LTO1[i] <- 63
+    final_data_culture$INDU1[i] <- 48
+
+  } else if (final_data_culture[i,1] == "Germany" ) {
+     final_data_culture$PD1[i] <- 35
+    final_data_culture$IDVI1[i] <- 67
+    final_data_culture$MA1[i] <- 66
+    final_data_culture$UA1[i] <- 65
+    final_data_culture$LTO1[i] <- 83
+    final_data_culture$INDU1[i] <- 40
+
+  } else if (final_data_culture[i,1] == "India" ) {
+    final_data_culture$PD1[i] <- 77
+    final_data_culture$IDVI1[i] <- 48
+    final_data_culture$MA1[i] <- 56
+    final_data_culture$UA1[i] <- 40
+    final_data_culture$LTO1[i] <- 51
+    final_data_culture$INDU1[i] <- 26
+
+  }  else if (final_data_culture[i,1] == "Netherlands" ) {
+    final_data_culture$PD1[i] <- 38
+    final_data_culture$IDVI1[i] <- 80
+    final_data_culture$MA1[i] <- 14
+    final_data_culture$UA1[i] <- 53
+    final_data_culture$LTO1[i] <- 67
+    final_data_culture$INDU1[i] <- 68
+
+  }  else if (final_data_culture[i,1] == "United Kingdom" ) {
+    final_data_culture$PD1[i] <- 35
+    final_data_culture$IDVI1[i] <- 89 
+    final_data_culture$MA1[i] <- 66
+    final_data_culture$UA1[i] <- 35
+    final_data_culture$LTO1[i] <- 51
+    final_data_culture$INDU1[i] <- 69
+
+    
+  } else if (final_data_culture[i,1]== "United States" ) {
+    final_data_culture$PD1[i] <- 40
+    final_data_culture$IDVI1[i] <- 91
+    final_data_culture$MA1[i] <- 62
+    final_data_culture$UA1[i] <- 46
+    final_data_culture$LTO1[i] <- 26
+    final_data_culture$INDU1[i] <- 68
+  } 
+}
+
+
+###Prepare cultural groups with 0 and 1 instead of low and high### 
+
+final_data_culture$PD3 <- NA
+final_data_culture$IDVI3 <- NA
+final_data_culture$MA3 <- NA
+final_data_culture$UA3 <- NA
+final_data_culture$LTO3 <- NA
+final_data_culture$INDU3 <- NA
+i=0
+
+for (i in 1:(nrow(final_data_culture))) {
+  if (final_data_culture$country[i] == "Australia") {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 1
+    final_data_culture$LTO3[i] <- 0
+    final_data_culture$INDU3[i] <- 1
+    
+  } else if (final_data_culture$country[i] == "Canada" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 0
+    final_data_culture$LTO3[i] <- 0
+    final_data_culture$INDU3[i] <- 1
+
+  } else if (final_data_culture$country[i]== "France" ) {
+    final_data_culture$PD3[i] <- 1
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 0
+    final_data_culture$UA3[i] <- 1
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 0
+
+  } else if (final_data_culture$country[i] == "Germany" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 1
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 0
+
+  } else if (final_data_culture$country[i] == "India" ) {
+    final_data_culture$PD3[i] <- 1
+    final_data_culture$IDVI3[i] <- 0
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 0
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 0
+
+  }  else if (final_data_culture$country[i] == "Netherlands" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 0
+    final_data_culture$UA3[i] <- 1
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 1
+
+  }  else if (final_data_culture$country[i] == "United Kingdom" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 0
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 1
+
+    
+  } else if (final_data_culture$country[i] == "United States" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 0
+    final_data_culture$LTO3[i] <- 0
+    final_data_culture$INDU3[i] <- 1
+
+  } 
+}
+
+
+
+```
+
+
+
+```{r}
+final_data_culture
+```
+
+
+<span style="color:red">Replies are not significant on cultural level</span>
+
+### Cramer's V for content ###
+```{r}
+
+tb <- table(final_data_culture$reply, final_data_culture$INDU)
+tb
+
+chisq.test(tb)
+
+library(lsr)
+cramersV(tb)
+```
+
+
+
+
+### Spearman Test
+```{r}
+cor.test(final_data_culture$PD3, final_data_culture$reply_ranks, method = "spearman", exact=FALSE)
+cor.test(final_data_culture$IDVI3, final_data_culture$reply_ranks, method = "spearman", exact=FALSE)
+cor.test(final_data_culture$UA3, final_data_culture$reply_ranks, method = "spearman", exact=FALSE)
+cor.test(final_data_culture$LTO3, final_data_culture$reply_ranks, method = "spearman", exact=FALSE)
+cor.test(final_data_culture$INDU3, final_data_culture$reply_ranks, method = "spearman", exact=FALSE)
+```
+
+
+### Pearson's Test
+```{r}
+cor.test(final_data_culture$PD1, final_data_culture$reply_ranks, method = "pearson")
+cor.test(final_data_culture$IDVI1, final_data_culture$reply_ranks, method = "pearson")
+cor.test(final_data_culture$UA1, final_data_culture$reply_ranks, method = "pearson")
+cor.test(final_data_culture$LTO1, final_data_culture$reply_ranks, method = "pearson")
+cor.test(final_data_culture$INDU1, final_data_culture$reply_ranks, method = "pearson")
+```
+
+
+```{r}
+cult <- final_data_culture
+
+data_long <- gather(cult, dimension, score, PD1:INDU1, factor_key=TRUE)
+data_long
+```
+
+
+```{r}
+hof_df <- data_long %>% 
+        select(country, dimension, score) 
+
+hof_df 
+```
+
+
+```{r}
+p <- ggplot(hof_df, aes(x = country, y = score)) +
+  geom_col(aes(color = dimension, fill = dimension), position = position_dodge(0.8), width = 0.7, size = 0.3, alpha = 0.2) +
+  geom_text(
+  aes(label = score, group = dimension), 
+  position = position_dodge(0.8),
+  vjust = -0.3, size = 2
+) +
+  theme_minimal()+
+  labs(x="Country", y="Retweet Count", title = "") +
+  theme(legend.position = "right", axis.text.x = element_text(angle = 90, hjust = 0.5)) 
+p
+```
+
+
+

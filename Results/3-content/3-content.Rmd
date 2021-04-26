@@ -1,0 +1,295 @@
+```{r}
+library(mongolite)
+library(tidyverse)
+library(dplyr)
+library(irr)
+library(jsonlite)
+library(ggpubr)
+library(stringi)
+library(qdap)
+library(cld2)
+library(plyr)
+library(e1071)
+library(xlsx)
+library(PMCMRplus)
+```
+
+```{r}
+#import MongoDB collection into R
+db <- mongo(
+  collection = "final1",
+  db = "analysis",
+  url = "mongodb://localhost:27017/",
+  verbose = FALSE,
+  options = ssl_options()
+)
+
+#count observations
+db$count()
+```
+
+```{r}
+# put environment into proper dataset - makes it easy to get an overview of nested table
+df <- db$find('{}')
+
+#take a quick look into the dataset
+#glimpse(df)
+
+# Flatten table
+datacomplete <- df %>% flatten()
+
+
+#Remove noise
+datacomplete1<-datacomplete[!(datacomplete$finalannotationcontentcategory=="Noise"),]
+
+
+# select only important columns from full dataset and save into a new data frame
+# my_data <- as_tibble(datacomplete)
+final_data <- datacomplete1 %>% select(app_name, country_code, country, content_category = finalannotationcontentcategory, sentiment = finalannotationsentiment, gender = finalannotationgender, created_at, text = full_text)
+
+final_data
+```
+
+##calculate content category counts per country##
+
+```{r}
+
+counts <- ddply(final_data, .(final_data$content_category, final_data$country), nrow)
+names(counts) <- c("Content", "Country", "Freq")
+#counts
+
+content_count <- spread(counts, "Content", Freq)
+
+x<- content_count
+
+content_count <- content_count %>%  bind_rows(summarise_all(., funs(if(is.numeric(.)) sum(.) else "Total")))
+content_count$Total = apply(content_count[,-1], 1, sum)
+content_count
+
+
+
+```
+
+```{r}
+
+write.xlsx2(content_count, 'content.xlsx', sheetName = "Sheet1",
+  col.names = TRUE, row.names = TRUE, append = FALSE)
+```
+
+
+
+##calculate content category frequency per country##
+```{r}
+# (54/118) *100 = 45%
+
+#AU
+Contentau <- final_data %>% filter(country_code == "AU")
+table(Contentau$content_category)
+relFreqcontentau <- prop.table(table(Contentau$content_category))
+relFreqcontentau *100
+
+#CA
+Contentca <- final_data %>% filter(country_code == "CA")
+relFreqcontentca <- prop.table(table(Contentca$content_category))
+relFreqcontentca
+
+#FR
+Contentfr <- final_data %>% filter(country_code == "FR")
+relFreqcontentfr <- prop.table(table(Contentfr$content_category))
+relFreqcontentfr
+
+#DE
+Contentde <- final_data %>% filter(country_code == "DE")
+relFreqcontentde <- prop.table(table(Contentde$content_category))
+relFreqcontentde
+
+#IN
+Contentin <- final_data %>% filter(country_code == "IN")
+relFreqcontentin <- prop.table(table(Contentin$content_category))
+relFreqcontentin
+
+#NL
+Contentnl <- final_data %>% filter(country_code == "NL")
+relFreqcontentnl <- prop.table(table(Contentnl$content_category))
+relFreqcontentnl
+
+#GB
+Contentgb <- final_data %>% filter(country_code == "GB")
+relFreqcontentgb <- prop.table(table(Contentgb$content_category))
+relFreqcontentgb
+
+#US
+Contentus <- final_data %>% filter(country_code == "US")
+relFreqcontentus <- prop.table(table(Contentus$content_category))
+relFreqcontentus
+
+
+```
+
+
+```{r}
+final_data
+```
+
+
+```{r}
+mycolor <- c("#fbb4b9", "#fdcdac", "#a6cee3", "#76BFF1")
+
+
+#barchart for content category
+ #c4 = c(#76BFF1", "#ff6384", "#FFDD8A", "#5ADB94")
+ ggplot(data = final_data) +
+   aes(x = country, fill = content_category) +
+  #scale_x_discrete(guide = guide_axis(n.dodge=2)) +
+  geom_bar(position = "fill") + 
+  labs(y="Content Category (%)", x = "Countries" ) +
+   scale_fill_manual(values = alpha(c("#ff6384", "#5ADB94", "#FFDD8A","#76BFF1"), .4))+
+  scale_y_continuous(labels = scales::percent_format()) +
+  guides(x = guide_axis(angle = 90)) +theme_bw() 
+
+
+ 
+```
+
+```{r}
+z <- final_data
+
+z <- data.frame(final_data$country, final_data$content_category)
+colnames(z)<- c("country", "content_category")
+
+z <- z %>% group_by(country, content_category) %>%
+  add_count(country)  %>%
+  distinct()
+
+colnames(z)<- c("country", "content_category", "count")
+z
+
+
+```
+
+
+
+```{r}
+
+p <- ggplot(data = z, aes(x = country, 
+                          y=count, 
+                          fill = content_category)) 
+p <- p + geom_bar(stat="identity",
+             position = "fill",
+             width = 0.6,
+             color = "#333333",
+             size = 0.3,
+             alpha = 0.4)+
+  theme_minimal()+
+  theme(legend.position = "right", axis.text.x = element_text(angle = 90, hjust = 0.8))+
+  labs(x="Country", y="Total Count", title = "Content Categories Count by Country") +
+  geom_text(aes(label=count), position = position_fill(vjust = 0.5), size=3) +
+  labs(fill = "Content Category")
+
+p
+
+```
+
+
+
+
+
+
+```{r}
+# df2 <- z %>%
+#   mutate(PercentOfCount = round(count/ sum(count), digits=2))
+# df2
+# 
+# p2 <- ggplot(data = df2, aes(x = country, 
+#                           y=PercentOfCount, 
+#                           fill = content_category)) 
+# p2 + geom_bar(stat="identity",
+#              position = "fill",
+#              width = 0.6,
+#              color = "black",
+#              size = 0.5,
+#              alpha = 0.5)+
+#   theme_minimal()+
+#   theme(legend.position = "right", axis.text.x = element_text(angle = 90, hjust = 0.8))+
+#   labs(x="Country", y="Total Count", title = "Content Categories Count by Country") +
+#   geom_text(aes(label=PercentOfCount), position = position_fill(vjust = 0.5), size=3)
+# p2
+```
+
+
+
+```{r}
+CrossTable(final_data$gender, final_data$PD)
+```
+
+
+
+```{r}
+tb_content <- table(final_data$country, final_data$content_category)
+tb_content
+chisq_content <- chisq.test(tb_content)
+chisq_content
+```
+
+```{r}
+library(rcompanion)
+options(scipen = 9999)
+
+contnet_posthoc <- pairwiseNominalIndependence(tb_content,
+                            fisher = FALSE,
+                            gtest  = FALSE,
+                            chisq  = TRUE,
+                            method = "bonferroni")
+contnet_posthoc
+```
+
+
+```{r}
+#typeof(xx)
+write.xlsx2(contnet_posthoc, 'junk.xlsx', sheetName = "Sheet1",
+  col.names = TRUE, row.names = TRUE, append = FALSE)
+```
+
+
+
+```{r}
+#png(height=500, width=500, pointsize=15, file="overlap.png")
+corrplot(chisq_content$residuals, is.cor = FALSE, mar = c(0,0,1,0), tl.cex = 0.8, method="circle",type="full",cl.ratio = 0.6, cl.align = "r", cl.offset =  0.14, )
+
+```
+
+
+
+## Poct hoc test for pairwise comparison
+```{r}
+# library(chisq.posthoc.test)
+# ?chisq.posthoc.test
+# chisq_content_posthoc <- chisq.posthoc.test(tb_content, method = "bonferroni")
+# chisq_content_posthoc
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

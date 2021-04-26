@@ -1,0 +1,906 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r}
+library(mongolite)
+library(tidyverse)
+library(dplyr)
+library(irr)
+library(jsonlite)
+library(ggpubr)
+library(stringi)
+library(qdap)
+library(cld2)
+library(plyr)
+library(e1071)
+library(xlsx)
+library(PMCMRplus)
+
+setwd("~/Movies/descriptiveStatsSal/Results/4-length")
+
+#import MongoDB collection into R
+db <- mongo(
+  collection = "final1",
+  db = "analysis",
+  url = "mongodb://localhost:27017/",
+  verbose = FALSE,
+  options = ssl_options()
+)
+
+#count observations
+db$count()
+
+# put environment into proper dataset - makes it easy to get an overview of nested table
+df <- db$find('{}')
+
+#take a quick look into the dataset
+#glimpse(df)
+
+# Flatten table
+datacomplete <- df %>% flatten()
+
+
+#Remove noise
+datacomplete1<-datacomplete[!(datacomplete$finalannotationcontentcategory=="Noise"),]
+
+
+# select only important columns from full dataset and save into a new data frame
+# my_data <- as_tibble(datacomplete)
+final_data <- datacomplete1 %>% select(app_name, country_code, country, content_category = finalannotationcontentcategory, sentiment = finalannotationsentiment, gender = finalannotationgender, created_at, text = full_text)
+
+final_data
+```
+
+
+
+### Get the orignial tweets ###
+```{r}
+unclean_tweet = final_data$text
+#unclean_tweet
+```
+
+
+### Function to clean Tweet Text ####
+```{r}
+library("stringr")
+
+clean_tweet_text <- function(unclean_tweet) {
+
+
+  clean_tweet = gsub("&amp", "", unclean_tweet)
+  clean_tweet = gsub("(RT|via)((?:\\b\\W*@\\w+)+)", "", clean_tweet)
+  clean_tweet = gsub("@\\w+", "", clean_tweet)
+  # clean_tweet = gsub("[[:digit:]]", "", clean_tweet)
+  clean_tweet = gsub("[ \t]{2,}", "", clean_tweet)
+  clean_tweet = gsub("^\\s+|\\s+$", "", clean_tweet)
+
+ # Remove emojis
+  clean_tweet <- gsub('\\p{So}|\\p{Cn}', '', clean_tweet, perl = TRUE)
+    
+  # Remove the urls
+  clean_tweet <- str_replace_all(clean_tweet, "https://t.co/[a-z,A-Z,0-9]*","")
+  clean_tweet <- str_replace_all(clean_tweet, "http://t.co/[a-z,A-Z,0-9]*","")
+
+  #Remove hashtags
+  #clean_tweet <- str_replace_all(clean_tweet,"#[a-z,A-Z]*","")
+
+  # Remove newlines (\n)
+   clean_tweet <- gsub("[\r\n]", " ", clean_tweet)
+   
+   # Remove all dots and dashes
+    #clean_tweet =  gsub("\\.", " ", clean_tweet, perl=TRUE)
+    #clean_tweet =  gsub("\\-", " ", clean_tweet, perl=TRUE)
+    #clean_tweet =  gsub("\\,", " ", clean_tweet, perl=TRUE)
+    #clean_tweet =  gsub("\\:", " ", clean_tweet, perl=TRUE)
+    #clean_tweet =  gsub("\\?", " ", clean_tweet, perl=TRUE)
+    #clean_tweet = gsub("[[:punct:]]", "", clean_tweet)
+    
+
+  # Remove additional spaces
+    clean_tweet = gsub("(?<=[\\s])\\s*|^\\s+|\\s+$", "", clean_tweet, perl=TRUE)
+    
+    return(clean_tweet)
+
+}
+
+clean_text <- clean_tweet_text(unclean_tweet)
+
+#clean_text
+```
+
+
+
+### Clean Text lengths per country 
+```{r}
+
+#AU 
+textau <- final_data %>% filter(country_code == "AU")
+textau <- textau$text
+textau <- clean_tweet_text(textau)
+
+#CA
+textca <- final_data %>% filter(country_code == "CA")
+textca <- textca$text
+textca <- clean_tweet_text(textca)
+
+#FR
+textfr <- final_data %>% filter(country_code == "FR")
+textfr <- textfr$text
+textfr <- clean_tweet_text(textfr)
+
+#DE
+textde <- final_data %>% filter(country_code == "DE")
+textde <- textde$text
+textde <- clean_tweet_text(textde)
+
+#IN
+textin <- final_data %>% filter(country_code == "IN")
+textin <- textin$text
+textin <- clean_tweet_text(textin)
+
+#NL
+textnl <- final_data %>% filter(country_code == "NL")
+textnl <- textnl$text
+textnl <- clean_tweet_text(textnl)
+
+#GB
+textgb <- final_data %>% filter(country_code == "GB")
+textgb <- textgb$text
+textgb <- clean_tweet_text(textgb)
+
+#US
+textus <- final_data %>% filter(country_code == "US")
+textus <- textus$text
+textus <- clean_tweet_text(textus)
+
+```
+
+
+
+### Get the character count and Create a DF for each country's tweet's character lengths 
+```{r}
+#AU 
+textau_char <-nchar(textau, type = "chars", allowNA = FALSE, keepNA = NA)
+AU_char_len_DF <- data.frame(c("Australia"), c(textau_char))
+colnames(AU_char_len_DF)<-  c("country", "text_length")
+
+#CA
+textca_char <-nchar(textca, type = "chars", allowNA = FALSE, keepNA = NA)
+CA_char_len_DF <- data.frame(c("Canada"), c(textca_char))
+colnames(CA_char_len_DF)<-  c("country", "text_length")
+
+#FR
+textfr_char <-nchar(textfr, type = "chars", allowNA = FALSE, keepNA = NA)
+FR_char_len_DF <- data.frame(c("France"), c(textfr_char))
+colnames(FR_char_len_DF)<-  c("country", "text_length")
+
+#DE
+textde_char <-nchar(textde, type = "chars", allowNA = FALSE, keepNA = NA)
+DE_char_len_DF <- data.frame(c("Germany"), c(textde_char))
+colnames(DE_char_len_DF)<-  c("country", "text_length")
+
+#IN
+textin_char <-nchar(textin, type = "chars", allowNA = FALSE, keepNA = NA)
+IN_char_len_DF <- data.frame(c("India"), c(textin_char))
+colnames(IN_char_len_DF)<-  c("country", "text_length")
+
+#NL
+textnl_char <-nchar(textnl, type = "chars", allowNA = FALSE, keepNA = NA)
+NL_char_len_DF <- data.frame(c("Netherlands"), c(textnl_char))
+colnames(NL_char_len_DF)<-  c("country", "text_length")
+
+#GB
+textgb_char <-nchar(textgb, type = "chars", allowNA = FALSE, keepNA = NA)
+GB_char_len_DF <- data.frame(c("United Kingdom"), c(textgb_char))
+colnames(GB_char_len_DF)<-  c("country", "text_length")
+
+#US
+textus_char <-nchar(textus, type = "chars", allowNA = FALSE, keepNA = NA)
+US_char_len_DF <- data.frame(c("United States"), c(textus_char))
+colnames(US_char_len_DF)<-  c("country", "text_length")
+
+# Merge all data frames for character text lenghts per country
+char_lenDF <- rbind(AU_char_len_DF, CA_char_len_DF, FR_char_len_DF, DE_char_len_DF, IN_char_len_DF, NL_char_len_DF, GB_char_len_DF, US_char_len_DF )
+
+char_lenDF
+```
+
+
+
+```{r}
+overall_char_length <-  char_lenDF %>% 
+              dplyr::summarise(n = n(),
+                   mean = mean(text_length, na.rm = TRUE),
+                   sd = sd(text_length, na.rm = TRUE),
+                   min = min(text_length, na.rm = TRUE),
+                   Q1 = quantile(text_length, 0.25,na.rm = TRUE),
+                   median= median(text_length, na.rm = TRUE),
+                   Q3 = quantile(text_length, 0.75,na.rm = TRUE),
+                   max = max(text_length, na.rm = TRUE),
+                   skewness = skewness(text_length, na.rm = TRUE),
+                   kurtosis = kurtosis(text_length, na.rm = TRUE)
+                   )
+overall_char_length
+```
+
+#### Descriptive stats for text_length per country
+```{r}
+char_len_desc <- char_lenDF %>% 
+              dplyr::group_by(country) %>% 
+              dplyr::summarise(n = n(),
+                   mean = mean(text_length, na.rm = TRUE),
+                   sd = sd(text_length, na.rm = TRUE),
+                   min = min(text_length, na.rm = TRUE),
+                   Q1 = quantile(text_length, 0.25,na.rm = TRUE),
+                   median= median(text_length, na.rm = TRUE),
+                   Q3 = quantile(text_length, 0.75,na.rm = TRUE),
+                   max = max(text_length, na.rm = TRUE),
+                   skewness = skewness(text_length, na.rm = TRUE),
+                   kurtosis = kurtosis(text_length, na.rm = TRUE)
+                   )
+char_len_desc
+
+```
+
+```{r}
+
+write.xlsx2(char_len_desc, 'char-len-descriptive-stat.xlsx', sheetName = "Sheet1",
+  col.names = TRUE, row.names = TRUE, append = FALSE)
+```
+
+```{r}
+library(ggplot2)
+#barchart for gender
+ ggplot(char_lenDF) +
+  aes(x = country, y= text_length, fill = country) +
+  geom_boxplot() +
+  labs(y="Number of Characters", x = "Countries")+
+  scale_fill_manual(values = alpha(c("#FFDD8A", "#5ADB94", "#5FDBDC", "#8d6e63", "#9575cd","#ff7043","#76BFF1", "#ff6384"), .4)) +
+  guides(x = guide_axis(angle = 90)) +
+  theme_minimal()+
+  geom_jitter(color="black", size=0.4, alpha=0.3) 
+
+ char_lenDF
+```
+
+
+
+
+### Check normality of characters without residuals
+```{r}
+# char_text_length <- char_lenDF$text_length
+# hist(char_text_length)
+# ggqqplot(char_text_length)
+# shapiro.test(char_text_length)
+```
+
+
+### Check normality with residuals
+#### Crete a linear model to get the residuals and test the normality of the character lengths
+
+```{r}
+library(rcompanion)
+
+# Attempt ANOVA on un-transformed data
+
+#Create a linear model
+country <- as.factor(char_lenDF$country)
+model <- lm(text_length ~ country, char_lenDF)
+aov(model)
+
+x = residuals(model)
+plotNormalHistogram(x)
+qqnorm(residuals(model), ylab="Sample Quantiles for residuals")
+qqline(residuals(model), col="red")
+plot(fitted(model), residuals(model))
+shapiro.test(residuals(model))
+```
+
+
+```{r}
+
+
+# Transform data
+library(MASS)
+
+Box = boxcox(text_length ~ country,
+             data = char_lenDF,
+             lambda = seq(-6,6,0.1)
+             )
+
+Cox = data.frame(Box$x, Box$y)
+
+Cox2 = Cox[with(Cox, order(-Cox$Box.y)),]
+
+Cox2[1,]
+
+lambda = Cox2[1, "Box.x"]
+
+char_lenDF$text_length_box = (char_lenDF$text_length ^ lambda - 1)/lambda  
+
+boxplot(text_length_box ~ country,
+        data = char_lenDF,
+        ylab="Box–Cox-transformed Charcter length",
+        xlab="Country")
+
+#Perform ANOVA and check residuals
+
+model1 <- lm(text_length_box ~ country, char_lenDF)
+aov(model1)
+
+
+x1 = residuals(model1)
+plotNormalHistogram(x1)
+qqnorm(residuals(model1), ylab="Sample Quantiles for residuals")
+qqline(residuals(model1), col="red")
+plot(fitted(model1), residuals(model1))
+shapiro.test(residuals(model1))
+```
+
+
+
+```{r}
+char_lenDF
+char_lenDF$text_length_box = NULL
+char_lenDF
+```
+
+```{r}
+# ch_df <- char_lenDF
+# 
+# # ch_df <- data.frame(char_lenDF$country, char_lenDF$text_length)
+# # colnames(ch_df)<- c("country", "text_length")
+# 
+# 
+# ch_df <- ch_df %>% group_by(country, text_length) %>%
+#   add_count(country)  %>%
+#   distinct()
+# 
+# colnames(fv_df)<- c("country", "text_length", "text_length_count")
+# ch_df
+```
+
+
+
+
+
+
+
+
+
+### Kruskal-Wallis Test
+```{r}
+kruskal.test(text_length ~ country, data = char_lenDF)
+```
+
+###  Kruskal-Wallis – post-hoc tests after Nemenyi ###
+```{r}
+library(PMCMR)
+char_lenDF$country <- as.factor(char_lenDF$country)
+posthoc.kruskal.nemenyi.test(char_lenDF$text_length, char_lenDF$country, data = char_lenDF, dist = "Tukey")
+```
+
+
+```{r}
+char_lenDF
+```
+
+
+
+# ===== CULTURE ====
+
+
+
+
+###Prepare cultural groups with low and high### 
+```{r}
+final_data_culture <- char_lenDF
+
+final_data_culture$PD <- NA
+final_data_culture$IDVI <- NA
+final_data_culture$MA <- NA
+final_data_culture$UA <- NA
+final_data_culture$LTO <- NA
+final_data_culture$INDU <- NA
+i=0
+
+for (i in 1:(nrow(final_data_culture))) {
+  if (final_data_culture$country[i] == "Australia") {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "high"
+    final_data_culture$LTO[i] <- "low"
+    final_data_culture$INDU[i] <- "high"
+    
+  } else if (final_data_culture$country[i] == "Canada" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "low"
+    final_data_culture$LTO[i] <- "low"
+    final_data_culture$INDU[i] <- "high"
+
+  } else if (final_data_culture$country[i]== "France" ) {
+    final_data_culture$PD[i] <- "high"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "low"
+    final_data_culture$UA[i] <- "high"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "low"
+
+  } else if (final_data_culture$country[i] == "Germany" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "high"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "low"
+
+  } else if (final_data_culture$country[i] == "India" ) {
+    final_data_culture$PD[i] <- "high"
+    final_data_culture$IDVI[i] <- "low"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "low"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "low"
+
+  }  else if (final_data_culture$country[i] == "Netherlands" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "low"
+    final_data_culture$UA[i] <- "high"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "high"
+
+  }  else if (final_data_culture$country[i] == "United Kingdom" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "low"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "high"
+
+    
+  } else if (final_data_culture$country[i] == "United States" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "low"
+    final_data_culture$LTO[i] <- "low"
+    final_data_culture$INDU[i] <- "high"
+
+  } 
+}
+
+
+###Prepare cultural groups with original scores### 
+
+final_data_culture$PD1 <- NA
+final_data_culture$IDVI1 <- NA
+final_data_culture$MA1 <- NA
+final_data_culture$UA1 <- NA
+final_data_culture$LTO1 <- NA
+final_data_culture$INDU1 <- NA
+i=0
+
+for (i in 1:(nrow(final_data_culture))) {
+  if (final_data_culture[i,1] == "Australia") {
+    final_data_culture$PD1[i] <- 38
+    final_data_culture$IDVI1[i] <- 90
+    final_data_culture$MA1[i] <- 61
+    final_data_culture$UA1[i] <- 51
+    final_data_culture$LTO1[i] <- 21
+    final_data_culture$INDU1[i] <- 71
+    
+  } else if (final_data_culture[i,1] == "Canada" ) {
+    final_data_culture$PD1[i] <- 39
+    final_data_culture$IDVI1[i] <- 80
+    final_data_culture$MA1[i] <- 52
+    final_data_culture$UA1[i] <- 48
+    final_data_culture$LTO1[i] <- 36
+    final_data_culture$INDU1[i] <- 68
+
+  } else if (final_data_culture[i,1] == "France" ) {
+     final_data_culture$PD1[i] <- 68
+    final_data_culture$IDVI1[i] <- 71
+    final_data_culture$MA1[i] <- 43
+    final_data_culture$UA1[i] <- 86
+    final_data_culture$LTO1[i] <- 63
+    final_data_culture$INDU1[i] <- 48
+
+  } else if (final_data_culture[i,1] == "Germany" ) {
+     final_data_culture$PD1[i] <- 35
+    final_data_culture$IDVI1[i] <- 67
+    final_data_culture$MA1[i] <- 66
+    final_data_culture$UA1[i] <- 65
+    final_data_culture$LTO1[i] <- 83
+    final_data_culture$INDU1[i] <- 40
+
+  } else if (final_data_culture[i,1] == "India" ) {
+    final_data_culture$PD1[i] <- 77
+    final_data_culture$IDVI1[i] <- 48
+    final_data_culture$MA1[i] <- 56
+    final_data_culture$UA1[i] <- 40
+    final_data_culture$LTO1[i] <- 51
+    final_data_culture$INDU1[i] <- 26
+
+  }  else if (final_data_culture[i,1] == "Netherlands" ) {
+    final_data_culture$PD1[i] <- 38
+    final_data_culture$IDVI1[i] <- 80
+    final_data_culture$MA1[i] <- 14
+    final_data_culture$UA1[i] <- 53
+    final_data_culture$LTO1[i] <- 67
+    final_data_culture$INDU1[i] <- 68
+
+  }  else if (final_data_culture[i,1] == "United Kingdom" ) {
+    final_data_culture$PD1[i] <- 35
+    final_data_culture$IDVI1[i] <- 89 
+    final_data_culture$MA1[i] <- 66
+    final_data_culture$UA1[i] <- 35
+    final_data_culture$LTO1[i] <- 51
+    final_data_culture$INDU1[i] <- 69
+
+    
+  } else if (final_data_culture[i,1]== "United States" ) {
+    final_data_culture$PD1[i] <- 40
+    final_data_culture$IDVI1[i] <- 91
+    final_data_culture$MA1[i] <- 62
+    final_data_culture$UA1[i] <- 46
+    final_data_culture$LTO1[i] <- 26
+    final_data_culture$INDU1[i] <- 68
+  } 
+}
+
+
+###Prepare cultural groups with 0 and 1 instead of low and high### 
+
+final_data_culture$PD3 <- NA
+final_data_culture$IDVI3 <- NA
+final_data_culture$MA3 <- NA
+final_data_culture$UA3 <- NA
+final_data_culture$LTO3 <- NA
+final_data_culture$INDU3 <- NA
+i=0
+
+for (i in 1:(nrow(final_data_culture))) {
+  if (final_data_culture$country[i] == "Australia") {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 1
+    final_data_culture$LTO3[i] <- 0
+    final_data_culture$INDU3[i] <- 1
+    
+  } else if (final_data_culture$country[i] == "Canada" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 0
+    final_data_culture$LTO3[i] <- 0
+    final_data_culture$INDU3[i] <- 1
+
+  } else if (final_data_culture$country[i]== "France" ) {
+    final_data_culture$PD3[i] <- 1
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 0
+    final_data_culture$UA3[i] <- 1
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 0
+
+  } else if (final_data_culture$country[i] == "Germany" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 1
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 0
+
+  } else if (final_data_culture$country[i] == "India" ) {
+    final_data_culture$PD3[i] <- 1
+    final_data_culture$IDVI3[i] <- 0
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 0
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 0
+
+  }  else if (final_data_culture$country[i] == "Netherlands" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 0
+    final_data_culture$UA3[i] <- 1
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 1
+
+  }  else if (final_data_culture$country[i] == "United Kingdom" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 0
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 1
+
+    
+  } else if (final_data_culture$country[i] == "United States" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 0
+    final_data_culture$LTO3[i] <- 0
+    final_data_culture$INDU3[i] <- 1
+
+  } 
+}
+
+
+
+```
+
+
+
+```{r}
+final_data_culture
+```
+
+
+### spearman's Test
+```{r}
+cor.test(final_data_culture$PD3, final_data_culture$text_length, method = "spearman",exact=FALSE)
+cor.test(final_data_culture$IDVI3, final_data_culture$text_length, method = "spearman",exact=FALSE)
+cor.test(final_data_culture$UA3, final_data_culture$text_length, method = "spearman",exact=FALSE)
+cor.test(final_data_culture$LTO3, final_data_culture$text_length, method = "spearman",exact=FALSE)
+cor.test(final_data_culture$INDU3, final_data_culture$text_length, method = "spearman",exact=FALSE)
+```
+
+
+
+
+
+
+
+
+
+
+
+# ######################################################### WORD LENGTH ################################################################
+
+### Get the word count and Create a DF for each country's tweet's word lengths 
+```{r}
+#AU
+textau_word <- sapply(strsplit(textau, " "), length)
+au_word_len_DF <- data.frame(c("Australia"), c(textau_word))
+colnames(au_word_len_DF)<-  c("country", "text_length")
+
+#CA
+textca_word <- sapply(strsplit(textca, " "), length)
+ca_word_len_DF <- data.frame(c("Canada"), c(textca_word))
+colnames(ca_word_len_DF)<-  c("country", "text_length")
+
+#FR
+textfr_word <- sapply(strsplit(textfr, " "), length)
+fr_word_len_DF <- data.frame(c("France"), c(textfr_word))
+colnames(fr_word_len_DF)<-  c("country", "text_length")
+
+
+#DE
+textde_word <- sapply(strsplit(textde, " "), length)
+de_word_len_DF <- data.frame(c("Germany"), c(textde_word))
+colnames(de_word_len_DF)<-  c("country", "text_length")
+
+
+
+#IN
+textin_word <- sapply(strsplit(textin, " "), length)
+in_word_len_DF <- data.frame(c("India"), c(textin_word))
+colnames(in_word_len_DF)<-  c("country", "text_length")
+
+
+#NL
+textnl_word <- sapply(strsplit(textnl, " "), length)
+nl_word_len_DF <- data.frame(c("Netherlands"), c(textnl_word))
+colnames(nl_word_len_DF)<-  c("country", "text_length")
+
+
+#GB
+textgb_word <- sapply(strsplit(textgb, " "), length)
+gb_word_len_DF <- data.frame(c("U nited Kingdom"), c(textgb_word))
+colnames(gb_word_len_DF)<-  c("country", "text_length")
+
+
+
+#US
+textus_word <- sapply(strsplit(textus, " "), length)
+us_word_len_DF <- data.frame(c("United States"), c(textus_word))
+colnames(us_word_len_DF)<-  c("country", "text_length")
+
+
+
+# Merge all data frames for word lenghts per country
+word_lenDF <- rbind(au_word_len_DF, ca_word_len_DF, fr_word_len_DF, de_word_len_DF, in_word_len_DF,  nl_word_len_DF, gb_word_len_DF, us_word_len_DF)
+
+word_lenDF
+
+```
+
+```{r}
+overall_word_length <-  word_lenDF %>% 
+              dplyr::summarise(n = n(),
+                   mean = mean(text_length, na.rm = TRUE),
+                   sd = sd(text_length, na.rm = TRUE),
+                   min = min(text_length, na.rm = TRUE),
+                   Q1 = quantile(text_length, 0.25,na.rm = TRUE),
+                   median= median(text_length, na.rm = TRUE),
+                   Q3 = quantile(text_length, 0.75,na.rm = TRUE),
+                   max = max(text_length, na.rm = TRUE),
+                   skewness = skewness(text_length, na.rm = TRUE),
+                   kurtosis = kurtosis(text_length, na.rm = TRUE)
+                   )
+overall_word_length
+```
+
+#### Descriptive stats for text_length per country
+```{r}
+word_len_desc <- word_lenDF %>% 
+              dplyr::group_by(country) %>% 
+              dplyr::summarise(n = n(),
+                   mean = mean(text_length, na.rm = TRUE),
+                   sd = sd(text_length, na.rm = TRUE),
+                   min = min(text_length, na.rm = TRUE),
+                   Q1 = quantile(text_length, 0.25,na.rm = TRUE),
+                   median= median(text_length, na.rm = TRUE),
+                   Q3 = quantile(text_length, 0.75,na.rm = TRUE),
+                   max = max(text_length, na.rm = TRUE),
+                   skewness = skewness(text_length, na.rm = TRUE),
+                   kurtosis = kurtosis(text_length, na.rm = TRUE)
+                   )
+word_len_desc
+
+```
+
+```{r}
+
+write.xlsx2(char_len_desc, 'word-len-descriptive-stat.xlsx', sheetName = "Sheet1",
+  col.names = TRUE, row.names = TRUE, append = FALSE)
+```
+
+
+```{r}
+library(ggplot2)
+#barchart for gender
+ ggplot(word_lenDF) +
+  aes(x = country, y= text_length, fill = country) +
+  geom_boxplot() +
+  labs(y="Number of Words", x = "Countries")+
+  scale_fill_manual(values = alpha(c("#FFDD8A", "#5ADB94", "#5FDBDC", "#8d6e63", "#9575cd","#ff7043","#76BFF1", "#ff6384"), .4)) +
+  guides(x = guide_axis(angle = 90)) +
+  theme_bw() +
+  geom_jitter(color="black", size=0.4, alpha=0.3) 
+
+```
+
+
+### Crete a linear model to get the residuals and test the normality of the word lengths
+```{r}
+#Create a linear model
+
+country <- as.factor(word_lenDF$country)
+lm_word <- lm(text_length~country, word_lenDF)
+#anova(m1)
+#summary(m1)
+lm_word$residuals
+hist(lm_word$residuals)
+qqnorm(lm_word$residuals)
+qqline(lm_word$residuals)
+shapiro.test(lm_word$residuals)
+
+```
+
+```{r}
+library(rcompanion)
+
+# Attempt ANOVA on un-transformed data
+
+#Create a linear model
+country <- as.factor(word_lenDF$country)
+model <- lm(text_length ~ country, word_lenDF)
+aov(model)
+
+x = residuals(model)
+plotNormalHistogram(x)
+qqnorm(residuals(model), ylab="Sample Quantiles for residuals")
+qqline(residuals(model), col="red")
+plot(fitted(model), residuals(model))
+shapiro.test(residuals(model))
+```
+
+
+```{r}
+# Transform data
+library(MASS)
+
+Box = boxcox(text_length ~ country,
+             data = word_lenDF,
+             lambda = seq(-6,6,0.1)
+             )
+
+Cox = data.frame(Box$x, Box$y)
+
+Cox2 = Cox[with(Cox, order(-Cox$Box.y)),]
+
+Cox2[1,]
+
+lambda = Cox2[1, "Box.x"]
+
+word_lenDF$text_length_box = (word_lenDF$text_length ^ lambda - 1)/lambda  
+
+boxplot(text_length_box ~ country,
+        data = word_lenDF,
+        ylab="Box–Cox-transformed Charcter length",
+        xlab="Country")
+
+#Perform ANOVA and check residuals
+
+model1 <- lm(text_length_box ~ country, word_lenDF)
+aov(model1)
+
+
+x1 = residuals(model1)
+plotNormalHistogram(x1)
+qqnorm(residuals(model1), ylab="Sample Quantiles for residuals")
+qqline(residuals(model1), col="red")
+plot(fitted(model1), residuals(model1))
+shapiro.test(residuals(model1))
+```
+
+
+### Kruskal-Wallis Test
+```{r}
+kruskal.test(text_length ~ country, data = word_lenDF)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

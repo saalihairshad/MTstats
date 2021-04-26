@@ -1,0 +1,230 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(mongolite)
+library(tidyverse)
+library(dplyr)
+library(irr)
+library(jsonlite)
+library(ggpubr)
+library(stringi)
+library(qdap)
+library(cld2)
+library(plyr)
+library(e1071)
+library("xlsx")
+library(PMCMRplus)
+```
+
+```{r}
+#import MongoDB collection into R
+db <- mongo(
+  collection = "final1",
+  db = "analysis",
+  url = "mongodb://localhost:27017/",
+  verbose = FALSE,
+  options = ssl_options()
+)
+
+#count observations
+db$count()
+```
+
+```{r}
+# put environment into proper dataset - makes it easy to get an overview of nested table
+df <- db$find('{}')
+
+#take a quick look into the dataset
+#glimpse(df)
+
+# Flatten table
+datacomplete <- df %>% flatten()
+
+
+#Remove noise
+datacomplete1<-datacomplete[!(datacomplete$finalannotationcontentcategory=="Noise"),]
+
+
+# select only important columns from full dataset and save into a new data frame
+# my_data <- as_tibble(datacomplete)
+final_data <- datacomplete1 %>% select(app_name, country_code, country, content_category = finalannotationcontentcategory, sentiment = finalannotationsentiment, gender = finalannotationgender, created_at, text = full_text)
+
+final_data
+```
+
+
+###### Sentiment #####
+#### Descriptive stats for complete sentiment
+```{r}
+overall_sentiment <-  final_data %>% 
+              dplyr::summarise(n = n(),
+                   mean = mean(sentiment, na.rm = TRUE),
+                   sd = sd(sentiment, na.rm = TRUE),
+                   min = min(sentiment, na.rm = TRUE),
+                   Q1 = quantile(sentiment, 0.25,na.rm = TRUE),
+                   median= median(sentiment, na.rm = TRUE),
+                   Q3 = quantile(sentiment, 0.75,na.rm = TRUE),
+                   max = max(sentiment, na.rm = TRUE),
+                   skewness = skewness(sentiment, na.rm = TRUE),
+                   kurtosis = kurtosis(sentiment, na.rm = TRUE)
+                   )
+overall_sentiment
+```
+
+#### Descriptive stats for sentiment per country
+```{r}
+senti_desc <- final_data %>% 
+              dplyr::group_by(country) %>% 
+              dplyr::summarise(n = n(),
+                   mean = mean(sentiment, na.rm = TRUE),
+                   sd = sd(sentiment, na.rm = TRUE),
+                   min = min(sentiment, na.rm = TRUE),
+                   Q1 = quantile(sentiment, 0.25,na.rm = TRUE),
+                   median= median(sentiment, na.rm = TRUE),
+                   Q3 = quantile(sentiment, 0.75,na.rm = TRUE),
+                   max = max(sentiment, na.rm = TRUE),
+                   skewness = skewness(sentiment, na.rm = TRUE),
+                   kurtosis = kurtosis(sentiment, na.rm = TRUE)
+                   )
+senti_desc
+
+```
+
+```{r}
+
+write.xlsx2(senti_desc, 'sentiment.xlsx', sheetName = "Sheet1",
+  col.names = TRUE, row.names = TRUE, append = FALSE)
+```
+
+
+
+```{r}
+#barchart for gender
+ ggplot(final_data) +
+  aes(x = country, y= sentiment, fill = country) +
+  geom_boxplot() +
+  labs(y="Sentiment", x = "Countries")+
+  scale_fill_manual(values = alpha(c("#FFDD8A", "#5ADB94", "#5FDBDC", "#8d6e63", "#9575cd","#ff7043","#76BFF1", "#ff6384"), .4)) +
+  guides(x = guide_axis(angle = 90)) +
+  theme_bw() +
+  geom_jitter(color="black", size=0.4, alpha=0.3) 
+
+```
+
+
+### The Distribution of obervation per country is not balanced 
+```{r}
+library(plyr)
+count(final_data, 'country')
+```
+
+### Kruskal-Wallis Test
+```{r}
+kruskal.test(sentiment ~ country, data = final_data)
+```
+
+###  Kruskal-Wallis – post-hoc tests after Nemenyi ###
+```{r}
+library(PMCMR)
+final_data$country <- as.factor(final_data$country)
+posthoc.kruskal.nemenyi.test(final_data$sentiment, final_data$country, data = final_data, dist = "Tukey")
+```
+
+```{r}
+final_data$country <- as.factor(final_data$country)
+posthoc.kruskal.nemenyi.test(sentiment ~ country, data = final_data, dist = "Chisquare")
+```
+
+
+### Kruskal-Wallis – post-hoc test after Dunn ###
+```{r}
+ posthoc.kruskal.dunn.test(final_data$sentiment, final_data$country, p.adjust.method="none")
+```
+
+```{r}
+ posthoc.kruskal.dunn.test(final_data$sentiment, final_data$country, p.adjust.method="bonferroni")
+```
+
+
+```{r}
+install.packages("dunn.test")
+install.packages("FSA")
+
+```
+
+```{r}
+#options(scipen=9999)
+#options(dplyr.print_max = 1e9)
+#options(tibble.print_max = Inf)
+library("dunn.test")
+library("FSA")
+
+dunn_df <- dunnTest(final_data$sentiment, final_data$country, method="bonferroni")
+dunn_df
+#View(dunn_df)
+```
+
+
+
+
+
+
+
+
+
+
+# -------------------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------
+```{r}
+library(tm)
+dataframe <- as.data.frame((dunn_df),  stringsAsFactors=F)
+
+
+```
+
+```{r}
+typeof(dunn_df)
+dunn_df<- unclass(dunn_df)
+
+as.data.frame(as.matrix(dunn_df))
+
+
+
+#as.data.frame(dunn_df)
+#impframe <-(unclass(dunn_df))
+#typeof(impframe)
+#impframe
+
+#write.table(impframe, file = "mtcars.txt", sep = "\t",           row.names = TRUE, col.names = NA)
+
+#write.xlsx(impframe, file = "myworkbook.xlsx",     sheetName = "USA-ARRESTS", append = FALSE)
+```
+
+
+
+```{r}
+library(tm)
+
+#dunn_df <- as.data.frame(dunn_df)
+
+write.xlsx2(dunn_df, 'dunn-test-sentiment.xlsx', sheetName = "Sheet12",
+  col.names = TRUE, row.names = TRUE, append = FALSE)
+```
+
+```{r}
+library(car)
+library(reshape2)
+leveneTest(final_data$sentiment ~ final_data$country, data = final_data)
+```
+
+
+```{r}
+0.00097013156207<0.05
+```
+
+
+
+

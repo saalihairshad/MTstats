@@ -1,0 +1,344 @@
+```{r}
+library(mongolite)
+library(tidyverse)
+library(dplyr)
+library(irr)
+library(jsonlite)
+library(ggpubr)
+library(stringi)
+library(qdap)
+library(cld2)
+library(plyr)
+library(e1071)
+library(xlsx)
+library(PMCMRplus)
+library(knitr)
+library(lubridate)
+library(reshape2)
+```
+
+
+```{r}
+options(max.print = 99999)
+
+#import MongoDB collection into R
+db <- mongo(
+  collection = "final1",
+  db = "analysis",
+  url = "mongodb://localhost:27017/",
+  verbose = FALSE,
+  options = ssl_options()
+)
+
+#count observations
+db$count()
+
+# put environment into proper dataset - makes it easy to get an overview of nested table
+df <- db$find('{}')
+
+#take a quick look into the dataset
+#glimpse(df)
+
+# Flatten table
+datacomplete <- df %>% flatten()
+
+
+#Remove noise
+datacomplete1<-datacomplete[!(datacomplete$finalannotationcontentcategory=="Noise"),]
+
+
+# select only important columns from full dataset and save into a new data frame
+# my_data <- as_tibble(datacomplete)
+final_data <- datacomplete1 %>% select(app_name, country_code, country, content_category = finalannotationcontentcategory, sentiment = finalannotationsentiment, gender = finalannotationgender, created_at, text = full_text)
+
+final_data
+```
+
+
+### Obtain month-year from the original date
+```{r}
+
+
+tweets_date <- as.POSIXct(final_data$created_at, format = "%a %b %e %T %z %Y")
+## Index each tweet by the day of its creation
+new_date = cut(tweets_date, breaks = "day")
+
+## Get the month and year
+final_data$new_date <- new_date
+final_data$new_date = as.Date(final_data$new_date, "%Y-%m-%d")
+final_data$month_year = format(as.Date(final_data$new_date), "%b-%Y")
+
+```
+
+### Get date, country and app 
+```{r}
+data <- data.frame(final_data$month_year, final_data$country, final_data$app_name)
+colnames(data)<- c("date", "country", "app")
+data
+```
+
+
+### Get country count w.r.t date
+```{r}
+data_country <- data %>% group_by(date, country) %>%
+ add_count(date)
+
+data_country <-  data_country %>% distinct()
+data_country
+
+```
+
+
+### Plot the tweets collected per month per country
+```{r}
+#png(height=1200, width=1200, pointsize=50, file="country.png")
+#tiff("test.tiff", units="in", width=5, height=5, res=300)
+ggplot(data_country, aes(x = date, y = n, fill=country)) +
+  geom_col(position = "dodge", alpha = 0.9) +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle = -90, hjust = 0)) +
+  xlab("Period") +
+  ylab("Tweet Count") +
+  labs(title = "Tweets collected per coutry per month") +
+  scale_fill_manual(values = alpha(c("#dd3497", "#66c2a4", "#9970ab", "#76BFF1", "#ffdb58", "#f46d43", "#bf812d", "#fba0e3" ), .4))
+  #theme_minimal()
+  #expand_limits(x = 4, y = 0)
+  # facet_wrap(. ~country, nrow = 3)
+```
+
+
+
+## Get country count w.r.t date
+```{r}
+data_app <- data %>% group_by(date, app) %>%
+ add_count(date)
+
+data_app <-  data_app %>% distinct()
+data_app
+
+```
+
+
+```{r}
+# x <- data_app %>% filter(app == "AdobeCare" && date=="Apr-2020")
+# x
+# sum(x$n)
+```
+
+
+### Plot the tweets collected per month per app
+```{r}
+#png(height=1200, width=1200, pointsize=50, file="country.png")
+#tiff("test.tiff", units="in", width=5, height=5, res=300)
+ggplot(data_app, aes(x = date, y = n, fill=app)) +
+  geom_col(position = "dodge", alpha = 0.9) +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle = -90, hjust = 0)) +
+  xlab("Period") +
+  ylab("Tweet Count") +
+  labs(title = "Tweets collected per coutry per month") +
+  scale_fill_manual(values = alpha(c("#dd3497", "#66c2a4", "#9970ab", "#76BFF1", "#ffdb58", "#f46d43", "#bf812d", "#fba0e3", "#ccebc5", "#fcbba1" ), .4))
+  #theme_minimal()
+  #expand_limits(x = 4, y = 0)
+  # facet_wrap(. ~country, nrow = 3)
+```
+
+
+
+
+## Get the count per month per app per country
+
+```{r}
+data_all <- data
+data_all <- data_all %>% group_by(date, country, app) %>%
+  add_count(date)
+
+data_all <-  data_all %>% distinct()
+
+data_all
+```
+
+## Plot tweet count per app per month per country
+```{r}
+
+ggplot(data_all, aes(x = date, y = n)) +
+  geom_col(position = "dodge", width=1) +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle = -90, hjust = 0))+
+  scale_fill_manual(values = alpha(c("#fbb4b9", "#fdcdac", "#a6cee3", "#76BFF1", "#bf812d", "#f46d43", "#9970ab", "#969696" ), .8)) +
+  facet_grid(country ~ app, space="free", scales="free") 
+```
+
+
+## Merge country and app and get the count w.r.t date
+```{r}
+df <- data %>% group_by(date, country, app) %>%
+  add_count(date)
+
+df <-  df %>% distinct()
+df <- df %>% unite(country_app, c(country, app))
+
+
+df
+```
+
+
+## Both plots below are not useful - too many distinict combinitions
+
+```{r}
+ggplot(df, aes(x = date, y = n)) +
+  geom_col(position = "dodge") +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle = -90, hjust = 0))+
+  facet_wrap(country_app ~., nrow = 4)
+```
+
+
+```{r}
+ggplot(df, aes(x=date, fill=country_app)) +
+  geom_bar(position = "dodge") +
+   theme(axis.text.x=element_text(angle = -90, hjust = 0))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+install.packages("lubridate")
+```
+
+
+```{r}
+
+#options(max.print=999999)
+date <- final_data$created_at
+typeof(date)
+```
+
+```{r}
+library(lubridate)
+setwd("~/Movies/descriptiveStatsSal/Results/5-timing")
+df1 = read.xlsx2("test.xlsx", header = T, sheetName = "Sheet1")
+df1$datescolumn <- NA
+df1$datescolumn <- as.Date(df1$month_year)
+```
+
+```{r}
+df1
+
+
+```
+
+
+```{r}
+p <-ggplot(df1, aes(month_year, count))
+p +geom_bar(stat = "identity", aes(fill = country), position = "dodge") +
+  xlab("Months") + ylab("Count") +
+  ggtitle("Chickens & Eggs") +
+  theme_bw() +
+  theme(axis.text.x=element_text(angle = -90, hjust = 0))
+
+p
+```
+
+
+
+
+```{r}
+data_long <- tidyr::gather(df1, key = type_col, value = count)
+
+ggplot(data_long, aes(x = categories, fill = app_name)) +
+  geom_bar() + 
+  facet_wrap(~ type_col, scales = "free_x")
+```
+
+
+
+```{r}
+period <- c("Dec 2019", "Aug 2019", "Feb 2018", "Jan 2020") #character objects need quotes
+country <- c("UK", "UK", "US", "FR")
+app <- c("adobe", "adobe", "linkedin", "evernote")
+#count <- c(10, 12, 8, 7)
+df <- data.frame(period, country, app, count)
+
+require(tidyr)
+df.long <- gather(df, variable, count)
+
+df
+```
+
+
+
+```{r}
+ggplot(data = df.long, aes(x = period, y = count, fill = variable)) +
+  geom_col(position = position_dodge()) 
+```
+
+
+
+```{r}
+dat = data.frame(grade1 = c('A','A','A','B','B','C'), grade2 = c('A','B','C','C','D','D'))
+
+library(tidyr)
+library(ggplot2)
+
+dat <- data.frame(grade1 = c('A','A','A','B','B','C'), grade2 = c('A','B','C','C','D','D'))
+
+tidy_dat <- gather(dat)
+tidy_dat[,2] <- ordered(tidy_dat[,2], levels = c('A','B','C','D'))
+
+ggplot(tidy_dat, aes(x= value, fill = key))+
+   geom_bar(position = 'dodge')
+```
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+
+
+dat <- df1
+dat$count <- NULL
+dat
+
+dat_long <- dat %>% gather(loop_number, country, -month_year)
+
+#dat_long
+
+#ggplot(dat_long, aes(x = month_year, y = Value, fill = Stat)) + geom_col(position = "dodge")
+
+```
+
+
+```{r}
+my_data2 <- gather(dat,
+                   key = c("country", "app_name"),
+                   value = "count",
+                   -month_year)
+
+my_data2
+```
+
+
+
+
+

@@ -1,0 +1,320 @@
+```{r}
+library(mongolite)
+library(tidyverse)
+library(dplyr)
+library(irr)
+library(jsonlite)
+library(ggpubr)
+library(stringi)
+library(qdap)
+library(cld2)
+library(plyr)
+library(e1071)
+library("xlsx")
+library(PMCMRplus)
+
+#import MongoDB collection into R
+db <- mongo(
+  collection = "final1",
+  db = "analysis",
+  url = "mongodb://localhost:27017/",
+  verbose = FALSE,
+  options = ssl_options()
+)
+
+#count observations
+db$count()
+
+# put environment into proper dataset - makes it easy to get an overview of nested table
+df <- db$find('{}')
+
+#take a quick look into the dataset
+#glimpse(df)
+
+# Flatten table
+datacomplete <- df %>% flatten()
+
+
+#Remove noise
+datacomplete1<-datacomplete[!(datacomplete$finalannotationcontentcategory=="Noise"),]
+
+
+# select only important columns from full dataset and save into a new data frame
+# my_data <- as_tibble(datacomplete)
+final_data <- datacomplete1 %>% select(retweet_count, favorite_count, app_name, country_code, country, content_category = finalannotationcontentcategory, sentiment = finalannotationsentiment, gender = finalannotationgender, created_at, text = full_text, replies)
+
+final_data
+```
+
+```{r}
+p <-ggplot(final_data, aes(country, retweet_count))
+p +geom_bar(stat = "identity", aes(fill = country), position = "dodge") +
+  xlab("Months") + ylab("Count") +
+  ggtitle("Retweet count per country and app") +
+  guides(x = guide_axis(angle = 90)) +
+  theme_bw() 
+  #geom_text(aes(label=favorite_count), position = position_fill(vjust = 0.5), size=6) 
+```
+
+```{r}
+x = data.frame(final_data$retweet_count, final_data$favorite_count)
+colnames(x)<-c('a','b')
+x
+```
+
+```{r}
+x = data_frame(retweet_count= final_data$retweet_count, country=final_data$country)
+
+x
+
+a <- spread(counts, "Country", Freq)
+a[is.na(a)] <- 0
+
+a$Content <- NULL
+#a
+
+a$Australia <- as.integer(a$Australia)
+a$Canada <- as.integer(a$Canada)
+a$France <- as.integer(a$France)
+a$Germany <- as.integer(a$Germany)
+a$India <- as.integer(a$India)
+a$Netherlands <- as.integer(a$Netherlands)
+a$'United Kingdom' <- as.integer(a$'United Kingdom')
+a$'United States' <- as.integer(a$'United States')
+
+a <- a %>%  bind_rows(summarise_all(., funs(if(is.numeric(.)) sum(.) else "Total")))
+a
+```
+
+
+
+```{r}
+r <- aggregate(retweet_count~country, final_data, sum)
+r$country <- as.factor(r$country)
+r
+
+
+p <-ggplot(r, aes(country, retweet_count))
+p +geom_bar(stat = "identity", aes(fill = country), position = "dodge") +
+  xlab("Months") + ylab("Count") +
+  ggtitle("Retweet count per country and app") +
+  guides(x = guide_axis(angle = 90)) +
+  theme_bw() 
+
+hist(r$retweet_count)
+qqnorm(r$retweet_count)
+
+
+kruskal.test(retweet_count ~ country, data = r)
+```
+
+
+```{r}
+library(rcompanion)
+
+# Attempt ANOVA on un-transformed data
+
+#Create a linear model
+model <- lm(retweet_count ~ country, final_data)
+aov(model)
+
+x = residuals(model)
+x
+plotNormalHistogram(x)
+qqnorm(x, ylab="Sample Quantiles for residuals")
+qqline(x, col="red")
+plot(fitted(model), x)
+shapiro.test(x)
+
+x1 <- log10(x)
+plotNormalHistogram(x1)
+qqnorm(x1, ylab="Sample Quantiles for residuals")
+qqline(x1, col="red")
+shapiro.test(x1)
+
+
+```
+
+
+```{r}
+summary(final_data$retweet_count)
+summary(log10(final_data$retweet_count)+1)
+summary(sqrt(final_data$retweet_count))
+```
+
+```{r}
+retweet_desc <- final_data %>% 
+              dplyr::group_by(country) %>% 
+              dplyr::summarise(n = n(),
+                   mean = mean(retweet_count, na.rm = TRUE),
+                   sd = sd(retweet_count, na.rm = TRUE),
+                   min = min(retweet_count, na.rm = TRUE),
+                   Q1 = quantile(retweet_count, 0.25,na.rm = TRUE),
+                   median= median(retweet_count, na.rm = TRUE),
+                   Q3 = quantile(retweet_count, 0.75,na.rm = TRUE),
+                   max = max(retweet_count, na.rm = TRUE),
+                   skewness = skewness(retweet_count, na.rm = TRUE),
+                   kurtosis = kurtosis(retweet_count, na.rm = TRUE)
+                   )
+retweet_desc
+```
+
+```{r}
+#barchart for gender
+ ggplot(final_data) +
+  aes(x = country, y= retweet_count, fill = country) +
+  geom_boxplot() +
+  labs(y="retweet_count", x = "Countries")+
+  scale_fill_manual(values = alpha(c("#FFDD8A", "#5ADB94", "#5FDBDC", "#8d6e63", "#9575cd","#ff7043","#76BFF1", "#ff6384"), .4)) +
+  guides(x = guide_axis(angle = 90)) +
+  theme_bw() +
+  geom_jitter(color="black", size=0.4, alpha=0.3) 
+```
+
+
+
+```{r}
+z <- final_data %>% filter(country_code == "US") 
+z<-z$retweet_count
+sum(z)
+```
+
+
+
+```{r}
+#AU 
+retweet_au <- final_data %>% filter(country_code == "AU") %>%
+              dplyr::summarize(count = n())
+retweet_au
+
+
+retweet_ca<- final_data %>% filter(country_code == "CA") %>%
+              dplyr::summarize(count = n())
+retweet_ca
+
+
+retweet_fr <- final_data %>% filter(country_code == "FR") %>%
+              dplyr::summarize(count = n())
+retweet_fr
+```
+
+```{r}
+# counts <- ddply(final_data, .(final_data$retweet_count, final_data$country), nrow)
+# names(counts) <- c("Content", "Country", "Freq")
+# #counts
+# 
+# content_count <- spread(counts, "Content", Freq)
+# 
+# x<- content_count
+# 
+# content_count <- content_count %>%  bind_rows(summarise_all(., funs(if(is.numeric(.)) sum(.) else "Total")))
+# content_count$Total = apply(content_count[,-1], 1, sum)
+# content_count
+
+
+```
+
+
+```{r}
+# content_count[is.na(content_count)] <- 0
+# content_count <- as.double(culture_ranks$gender)
+```
+
+
+
+
+
+
+
+
+```{r}
+hist(final_data$favorite_count)
+```
+
+
+### Kruskal-Wallis Test
+```{r}
+kruskal.test(retweet_count ~ country, data = final_data)
+```
+
+```{r}
+p <-ggplot(final_data, aes(country, favorite_count))
+p +geom_bar(stat = "identity", aes(fill = country), position = "dodge", width = 1) +
+  xlab("Months") + ylab("Count") +
+  ggtitle("Favorite count per country and app") +
+  theme_bw() +
+  guides(x = guide_axis(angle = 90)) 
+
+# +
+#   coord_flip() 
+```
+
+
+
+```{r}
+
+p <- ggplot(data = final_data, aes(x = country, 
+                          y=favorite_count, 
+                          fill = country)) 
+p <- p + geom_bar(stat="identity",
+             position = "fill",
+             # width = 0.6,
+             # color = "#333333",
+             # size = 0.3,
+             alpha = 0.4)+
+  theme_minimal()+
+  theme(legend.position = "right", axis.text.x = element_text(angle = 90, hjust = 0.8))+
+  labs(x="Country", y="Total Count", title = "Content Categories Count by Country") +
+  #geom_text(aes(label=favorite_count), position = position_fill(vjust = 0.5), size=3) +
+  labs(fill = "Content Category")
+
+p
+
+```
+
+
+```{r}
+
+#barchart for content category
+ #c4 = c(#76BFF1", "#ff6384", "#FFDD8A", "#5ADB94")
+ ggplot(data = final_data) +
+   aes(x = country, fill = app_name) +
+  #scale_x_discrete(guide = guide_axis(n.dodge=2)) +
+  geom_bar(position = "fill") + 
+  labs(y="Content Category (%)", x = "Countries" ) +
+   #scale_fill_manual(values = alpha(c("#ff6384", "#5ADB94", "#FFDD8A","#76BFF1"), .4))+
+  scale_y_continuous(labels = scales::percent_format()) +
+  guides(x = guide_axis(angle = 90)) +theme_bw() 
+
+```
+
+
+```{r}
+ggplot(data=final_data, aes(x=country , y=favorite_count, fill=app_name)) +
+  geom_bar(stat="identity", position=position_dodge())+
+  geom_text(aes(label=favorite_count), vjust=1.6, color="white",
+            position = position_dodge(0.9), size=1.5)+
+  scale_fill_brewer(palette="Paired")+
+  theme_minimal()
+```
+
+
+
+
+
+```{r}
+r <- final_data$replies
+length(r[1150])
+```
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,55 @@
+
+```{r}
+Input =("
+Supplement     No.cancer  Cancer
+'Selenium'     8177       575
+'Vitamin E'    8117       620
+'Selenium+E'   8147       555
+'Placebo'      8167       529
+")
+
+Matriz = as.matrix(read.table(textConnection(Input),
+                   header=TRUE,
+                   row.names=1))
+
+Matriz
+#tb_content
+```
+
+```{r}
+chisq.test(Matriz)
+```
+
+```{r}
+install.packages("rcompanion")
+library(rcompanion)
+```
+
+```{r}
+options(scipen = 9999)
+xx <- pairwiseNominalIndependence(tb_content,
+                            fisher = FALSE,
+                            gtest  = FALSE,
+                            chisq  = TRUE,
+                            method = "bonferroni")
+xx
+```
+
+
+```{r}
+#typeof(xx)
+write.xlsx2(xx, 'junk.xlsx', sheetName = "Sheet1",
+  col.names = TRUE, row.names = TRUE, append = FALSE)
+```
+
+
+```{r}
+?p.adjust
+
+```
+
+```{r}
+0.00095200000					< 0.05
+```
+
+

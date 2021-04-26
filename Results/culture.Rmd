@@ -1,0 +1,991 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(mongolite)
+library(tidyverse)
+library(dplyr)
+library(irr)
+library(jsonlite)
+library(ggpubr)
+library(stringi)
+library(qdap)
+library(cld2)
+library(plyr)
+library(e1071)
+library(xlsx)
+library(PMCMRplus)
+```
+
+```{r}
+#import MongoDB collection into R
+db <- mongo(
+  collection = "final1",
+  db = "analysis",
+  url = "mongodb://localhost:27017/",
+  verbose = FALSE,
+  options = ssl_options()
+)
+
+#count observations
+db$count()
+```
+
+```{r}
+# put environment into proper dataset - makes it easy to get an overview of nested table
+df <- db$find('{}')
+
+#take a quick look into the dataset
+#glimpse(df)
+
+# Flatten table
+datacomplete <- df %>% flatten()
+
+
+#Remove noise
+datacomplete1<-datacomplete[!(datacomplete$finalannotationcontentcategory=="Noise"),]
+
+
+# select only important columns from full dataset and save into a new data frame
+# my_data <- as_tibble(datacomplete)
+final_data <- datacomplete1 %>% select(app_name, country_code, country, content_category = finalannotationcontentcategory, sentiment = finalannotationsentiment, gender = finalannotationgender, created_at, text = full_text)
+
+final_data
+```
+
+
+###Prepare cultural groups with low and high### 
+```{r}
+final_data_culture <- final_data
+
+final_data_culture$culturegroup <- NA
+final_data_culture$PD <- NA
+final_data_culture$IDVI <- NA
+final_data_culture$MA <- NA
+final_data_culture$UA <- NA
+final_data_culture$LTO <- NA
+final_data_culture$INDU <- NA
+i=0
+
+for (i in 1:(nrow(final_data_culture))) {
+  if (final_data_culture$country_code[i] == "AU") {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "high"
+    final_data_culture$LTO[i] <- "low"
+    final_data_culture$INDU[i] <- "high"
+    
+  } else if (final_data_culture$country_code[i] == "CA" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "low"
+    final_data_culture$LTO[i] <- "low"
+    final_data_culture$INDU[i] <- "high"
+
+  } else if (final_data_culture$country_code[i]== "FR" ) {
+    final_data_culture$PD[i] <- "high"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "low"
+    final_data_culture$UA[i] <- "high"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "low"
+
+  } else if (final_data_culture$country_code[i] == "DE" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "high"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "low"
+
+  } else if (final_data_culture$country_code[i] == "IN" ) {
+    final_data_culture$PD[i] <- "high"
+    final_data_culture$IDVI[i] <- "low"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "low"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "low"
+
+  }  else if (final_data_culture$country_code[i] == "NL" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "low"
+    final_data_culture$UA[i] <- "high"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "high"
+
+  }  else if (final_data_culture$country_code[i] == "GB" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "low"
+    final_data_culture$LTO[i] <- "high"
+    final_data_culture$INDU[i] <- "high"
+
+    
+  } else if (final_data_culture$country_code[i] == "US" ) {
+    final_data_culture$PD[i] <- "low"
+    final_data_culture$IDVI[i] <- "high"
+    final_data_culture$MA[i] <- "high"
+    final_data_culture$UA[i] <- "low"
+    final_data_culture$LTO[i] <- "low"
+    final_data_culture$INDU[i] <- "high"
+
+  } 
+}
+
+df_culture1 <- data.frame(final_data_culture$country_code, final_data_culture$PD, final_data_culture$IDVI, final_data_culture$MA, final_data_culture$UA, final_data_culture$LTO, final_data_culture$INDU)
+
+colnames(df_culture1) <- c("country", "PD", "IDVI", "MA", "UA", "LTO", "INDU")
+df_culture1
+```
+
+###Prepare cultural groups with original scores### 
+```{r}
+final_data_culture$PD1 <- NA
+final_data_culture$IDVI1 <- NA
+final_data_culture$MA1 <- NA
+final_data_culture$UA1 <- NA
+final_data_culture$LTO1 <- NA
+final_data_culture$INDU1 <- NA
+i=0
+
+for (i in 1:(nrow(final_data_culture))) {
+  if (final_data_culture[i,2] == "AU") {
+    final_data_culture$PD1[i] <- 38
+    final_data_culture$IDVI1[i] <- 90
+    final_data_culture$MA1[i] <- 61
+    final_data_culture$UA1[i] <- 51
+    final_data_culture$LTO1[i] <- 21
+    final_data_culture$INDU1[i] <- 71
+    
+  } else if (final_data_culture[i,2] == "CA" ) {
+    final_data_culture$PD1[i] <- 39
+    final_data_culture$IDVI1[i] <- 80
+    final_data_culture$MA1[i] <- 52
+    final_data_culture$UA1[i] <- 48
+    final_data_culture$LTO1[i] <- 36
+    final_data_culture$INDU1[i] <- 68
+
+  } else if (final_data_culture[i,2] == "FR" ) {
+     final_data_culture$PD1[i] <- 68
+    final_data_culture$IDVI1[i] <- 71
+    final_data_culture$MA1[i] <- 43
+    final_data_culture$UA1[i] <- 86
+    final_data_culture$LTO1[i] <- 63
+    final_data_culture$INDU1[i] <- 48
+
+  } else if (final_data_culture[i,2] == "DE" ) {
+     final_data_culture$PD1[i] <- 35
+    final_data_culture$IDVI1[i] <- 67
+    final_data_culture$MA1[i] <- 66
+    final_data_culture$UA1[i] <- 65
+    final_data_culture$LTO1[i] <- 83
+    final_data_culture$INDU1[i] <- 40
+
+  } else if (final_data_culture[i,2] == "IN" ) {
+    final_data_culture$PD1[i] <- 77
+    final_data_culture$IDVI1[i] <- 48
+    final_data_culture$MA1[i] <- 56
+    final_data_culture$UA1[i] <- 40
+    final_data_culture$LTO1[i] <- 51
+    final_data_culture$INDU1[i] <- 26
+
+  }  else if (final_data_culture[i,2] == "NL" ) {
+    final_data_culture$PD1[i] <- 38
+    final_data_culture$IDVI1[i] <- 80
+    final_data_culture$MA1[i] <- 14
+    final_data_culture$UA1[i] <- 53
+    final_data_culture$LTO1[i] <- 67
+    final_data_culture$INDU1[i] <- 68
+
+  }  else if (final_data_culture[i,2] == "GB" ) {
+    final_data_culture$PD1[i] <- 35
+    final_data_culture$IDVI1[i] <- 89 
+    final_data_culture$MA1[i] <- 66
+    final_data_culture$UA1[i] <- 35
+    final_data_culture$LTO1[i] <- 51
+    final_data_culture$INDU1[i] <- 69
+
+    
+  } else if (final_data_culture[i,2]== "US" ) {
+    final_data_culture$PD1[i] <- 40
+    final_data_culture$IDVI1[i] <- 91
+    final_data_culture$MA1[i] <- 62
+    final_data_culture$UA1[i] <- 46
+    final_data_culture$LTO1[i] <- 26
+    final_data_culture$INDU1[i] <- 68
+  } 
+}
+
+# df_culture2 <- data.frame(final_data_culture$country_code, final_data_culture$PD1, final_data_culture$IDVI1, final_data_culture$MA1, final_data_culture$UA1, final_data_culture$LTO1, final_data_culture$INDU1)
+# 
+# colnames(df_culture2) <- c("country", "PD", "IDVI", "MA", "UA", "LTO", "INDU")
+# df_culture2
+
+
+```
+
+###Prepare cultural groups with 0 and 1 instead of low and high### 
+```{r}
+
+final_data_culture$PD3 <- NA
+final_data_culture$IDVI3 <- NA
+final_data_culture$MA3 <- NA
+final_data_culture$UA3 <- NA
+final_data_culture$LTO3 <- NA
+final_data_culture$INDU3 <- NA
+i=0
+
+for (i in 1:(nrow(final_data_culture))) {
+  if (final_data_culture$country_code[i] == "AU") {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 1
+    final_data_culture$LTO3[i] <- 0
+    final_data_culture$INDU3[i] <- 1
+    
+  } else if (final_data_culture$country_code[i] == "CA" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 0
+    final_data_culture$LTO3[i] <- 0
+    final_data_culture$INDU3[i] <- 1
+
+  } else if (final_data_culture$country_code[i]== "FR" ) {
+    final_data_culture$PD3[i] <- 1
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 0
+    final_data_culture$UA3[i] <- 1
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 0
+
+  } else if (final_data_culture$country_code[i] == "DE" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 1
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 0
+
+  } else if (final_data_culture$country_code[i] == "IN" ) {
+    final_data_culture$PD3[i] <- 1
+    final_data_culture$IDVI3[i] <- 0
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 0
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 0
+
+  }  else if (final_data_culture$country_code[i] == "NL" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 0
+    final_data_culture$UA3[i] <- 1
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 1
+
+  }  else if (final_data_culture$country_code[i] == "GB" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 0
+    final_data_culture$LTO3[i] <- 1
+    final_data_culture$INDU3[i] <- 1
+
+    
+  } else if (final_data_culture$country_code[i] == "US" ) {
+    final_data_culture$PD3[i] <- 0
+    final_data_culture$IDVI3[i] <- 1
+    final_data_culture$MA3[i] <- 1
+    final_data_culture$UA3[i] <- 0
+    final_data_culture$LTO3[i] <- 0
+    final_data_culture$INDU3[i] <- 1
+
+  } 
+}
+
+# df_culture1 <- data.frame(final_data_culture$country_code, final_data_culture$PD3, final_data_culture$IDVI3, final_data_culture$MA3, final_data_culture$UA3, final_data_culture$LTO3, final_data_culture$INDU3)
+# 
+# colnames(df_culture1) <- c("country", "PD", "IDVI", "MA", "UA", "LTO", "INDU")
+# df_culture1
+final_data_culture
+```
+
+
+```{r}
+# Useful content
+
+final_data_culture$usefulcontent<- NA
+i=0
+
+for (i in 1:(nrow(final_data_culture))) {
+  if (final_data_culture$content_category[i] == "SupportRequest") {
+    final_data_culture$usefulcontent[i] = 1
+  } else if (final_data_culture$content_category[i] == "BugReport") {
+    final_data_culture$usefulcontent[i] = 1
+  } else if (final_data_culture$content_category[i] == "FeatureRequest") {
+    final_data_culture$usefulcontent[i] = 1
+  } else if (final_data_culture$content_category[i] == "Other") {
+    final_data_culture$usefulcontent[i] = 0
+  }
+}
+final_data_culture
+
+```
+
+
+```{r}
+#Convert gender into numbers first labeler f=0, m=1, u=2
+final_data_culture_ranked <- final_data_culture
+k=0
+
+
+for (k in 1:(nrow(final_data_culture_ranked))) {
+  if(final_data_culture_ranked[k, 6] == "female") {
+    final_data_culture_ranked[k, 6]<- 0
+  } else if (final_data_culture_ranked[k, 6] == "male") {
+    final_data_culture_ranked[k, 6]<- 1
+  } else
+    final_data_culture_ranked[k, 6]<- 2
+}
+
+#Convert content into numbers first labeler BR=0, FR=1, SR=2, OTH=3
+for (k in 1:(nrow(final_data_culture_ranked))) {
+  if(final_data_culture_ranked[k, 4] == "BugReport") {
+    final_data_culture_ranked[k, 4]<- 1
+  } else if (final_data_culture_ranked[k, 4] == "FeatureRequest") {
+    final_data_culture_ranked[k, 4]<- 1
+  } else if (final_data_culture_ranked[k, 4] == "SupportRequest") {
+    final_data_culture_ranked[k, 4]<- 1
+  } else
+    final_data_culture_ranked[k, 4]<- 0
+}
+```
+
+
+
+```{r}
+final_data_culture_ranked$gender <- as.double(final_data_culture_ranked$gender)
+final_data_culture_ranked$content_category <- as.double(final_data_culture_ranked$content_category)
+final_data_culture_ranked 
+```
+
+```{r}
+j=0
+
+for (j in 1:(nrow(final_data_culture))) {
+  if(final_data_culture[j, 5] == -2) {
+    final_data_culture[j, 5]<- "VeryNegative"
+  } else if (final_data_culture[j, 5] == -1) {
+    final_data_culture[j, 5]<- "Negative"
+  } else if (final_data_culture[j, 5] == 0) {
+    final_data_culture[j, 5]<- "Neutral"
+  } else if (final_data_culture[j, 5] == 1) {
+    final_data_culture[j, 5]<- "Positive"
+  } else
+    final_data_culture[j, 5]<- "VeryPositive"
+}
+
+final_data_culture
+```
+
+
+
+
+### ================================================================================================================== ###
+# Spearman Correlation Test for CONTENT (useful 1(BR,FR) and not useful 1) and CULTURAL DIMENSIONS
+# both x and y are set to ordinal values
+### ================================================================================================================== ###
+
+
+```{r}
+cor.test(final_data_culture_ranked$LTO1, final_data_culture_ranked$content_category, method = "pearson")
+```
+
+
+### ================================================================================================================== ###
+# Spearman Correlation Test for CONTENT (useful 1 (BR, FR,SR) and not useful 0) and CULTURAL DIMENSIONS
+# both x and y are set to ordinal values
+### ================================================================================================================== ###
+
+```{r}
+#
+cor.test(final_data_culture_ranked$INDU3, final_data_culture_ranked$usefulcontent, method = "spearman")
+```
+
+
+
+```{r}
+cor.test(final_data_culture_ranked$LTO1, final_data_culture_ranked$sentiment, method = "pearson")
+```
+
+
+
+
+```{r}
+library(gmodels)
+CrossTable(final_data_culture_ranked$sentiment, final_data_culture_ranked$PD)
+```
+
+
+### Cramer's V for sentiment ###
+```{r}
+senti_tb <- table(final_data_culture$sentiment, final_data_culture$INDU)
+senti_tb
+
+chisq.test(senti_tb)
+
+library(lsr)
+cramersV(senti_tb)
+```
+
+
+
+
+### ================================================================================================================== ###
+# Spearman Correlation Test for SENTIMENT and CULTURAL DIMENSIONS
+# both x and y are set to ordinal values
+### ================================================================================================================== ###
+
+```{r}
+cor.test(final_data_culture_ranked$INDU3, final_data_culture_ranked$sentiment, method = "spearman")
+```
+
+
+
+# ======= PD ==========
+
+# H0: Countries with a low PD index tend to give more relevant feedback regarding software evolution.
+# H0: Countries with a high Individualism index tend to give more relevant feedback regarding software evolution.
+
+
+## The proportion of tweets that is relevant for software evolution for a specific country is positively correlated to the Power Index of that country and negatively correlated to the Individualism and Indulgence.
+
+### ================================================================================================================== ###
+# Cramer's V Test for GENDER and CULTURAL DIMENSIONS
+# both x and y are categorical
+### ================================================================================================================== ###
+
+
+
+```{r}
+cramer_tb <- table(final_data_culture_ranked$INDU3, final_data_culture_ranked$content_category)
+cramer_tb
+
+# n <-sum(cramer_tb)
+# q <- min(nrow(cramer_tb), ncol(cramer_tb))
+# chi2 <- unname(chisq.test(cramer_tb, correct = F)$statistic)
+# v <- sqrt(chi2/(n*(q-1)))
+# v
+                
+chisq.test(cramer_tb)
+
+library(lsr)
+cramersV(cramer_tb)
+
+# library(DescTools)
+# CramerV(cramer_tb )
+```
+
+
+
+
+
+
+### ================================================================================================================== ###
+# Spearman Correlation Test for SENTIMENT and CULTURAL DIMENSIONS
+# both x and y are set to ordinal values
+### ================================================================================================================== ###
+
+```{r}
+cor.test(final_data_culture_ranked$LTO3, final_data_culture_ranked$content_category, method = "spearman")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## culture group for PD and INDU
+```{r}
+df_pd_indu <- final_data
+
+df_pd_indu$PD1 <- NA
+df_pd_indu$INDU1 <- NA
+df_pd_indu$culturegroup <- NA
+
+
+i=0
+
+for (i in 1:(nrow(df_pd_indu))) {
+  if (df_pd_indu[i,2] == "AU") {
+    df_pd_indu$PD1[i] <- 38
+    df_pd_indu$INDU1[i] <- 71
+    df_pd_indu$culturegroup[i] <- "lowhigh"
+    
+  } else if (df_pd_indu[i,2] == "CA" ) {
+    df_pd_indu$PD1[i] <- 39
+    df_pd_indu$INDU1[i] <- 68
+    df_pd_indu$culturegroup[i] <- "lowhigh"
+
+  } else if (df_pd_indu[i,2] == "FR" ) {
+     df_pd_indu$PD1[i] <- 68
+    df_pd_indu$INDU1[i] <- 48
+    df_pd_indu$culturegroup[i] <- "highlow"
+
+  } else if (df_pd_indu[i,2] == "DE" ) {
+     df_pd_indu$PD1[i] <- 35
+    df_pd_indu$INDU1[i] <- 40
+    df_pd_indu$culturegroup[i] <- "lowlow"
+
+  } else if (df_pd_indu[i,2] == "IN" ) {
+    df_pd_indu$PD1[i] <- 77
+    df_pd_indu$INDU1[i] <- 26
+    df_pd_indu$culturegroup[i] <- "highlow"
+
+  }  else if (df_pd_indu[i,2] == "NL" ) {
+    df_pd_indu$PD1[i] <- 38
+    df_pd_indu$INDU1[i] <- 68
+    df_pd_indu$culturegroup[i] <- "lowhigh"
+
+  }  else if (df_pd_indu[i,2] == "GB" ) {
+    df_pd_indu$PD1[i] <- 35
+    df_pd_indu$INDU1[i] <- 69
+    df_pd_indu$culturegroup[i] <- "lowhigh"
+
+    
+  } else if (df_pd_indu[i,2]== "US" ) {
+    df_pd_indu$PD1[i] <- 40
+    df_pd_indu$INDU1[i] <- 68
+    df_pd_indu$culturegroup[i] <- "lowhigh"
+  } 
+}
+
+df_pd_indu
+```
+
+
+## culture group for IDVI and UA
+```{r}
+df_idvi_ua <- final_data
+
+df_idvi_ua$IDVI1 <- NA
+df_idvi_ua$UA1 <- NA
+df_idvi_ua$culturegroup <- NA
+
+
+i=0
+
+for (i in 1:(nrow(df_idvi_ua))) {
+  if (df_idvi_ua[i,2] == "AU") {
+    df_idvi_ua$IDVI1[i] <- 90
+    df_idvi_ua$UA1[i] <- 51
+    df_idvi_ua$culturegroup[i] <- "highhigh"
+    
+  } else if (df_idvi_ua[i,2] == "CA" ) {
+    df_idvi_ua$IDVI1[i] <- 80
+    df_idvi_ua$UA1[i] <- 48
+    df_idvi_ua$culturegroup[i] <- "highlow"
+    
+
+  } else if (df_idvi_ua[i,2] == "FR" ) {
+    df_idvi_ua$IDVI1[i] <- 71
+    df_idvi_ua$UA1[i] <- 86
+    df_idvi_ua$culturegroup[i] <- "highhigh"
+  
+
+  } else if (df_idvi_ua[i,2] == "DE" ) {
+    df_idvi_ua$IDVI1[i] <- 67
+    df_idvi_ua$UA1[i] <- 65
+    df_idvi_ua$culturegroup[i] <- "highhigh"
+
+  } else if (df_idvi_ua[i,2] == "IN" ) {
+    df_idvi_ua$IDVI1[i] <- 48
+    df_idvi_ua$UA1[i] <- 40
+    df_idvi_ua$culturegroup[i] <- "lowlow"
+
+  }  else if (df_idvi_ua[i,2] == "NL" ) {
+    df_idvi_ua$IDVI1[i] <- 80
+    df_idvi_ua$UA1[i] <- 53
+    df_idvi_ua$culturegroup[i] <- "highhigh"
+
+
+  }  else if (df_idvi_ua[i,2] == "GB" ) {
+    df_idvi_ua$IDVI1[i] <- 89 
+    df_idvi_ua$UA1[i] <- 35
+    df_idvi_ua$culturegroup[i] <- "highlow"
+ 
+
+    
+  } else if (df_idvi_ua[i,2]== "US" ) {
+    df_idvi_ua$IDVI1[i] <- 91
+    df_idvi_ua$UA1[i] <- 46
+    df_idvi_ua$culturegroup[i] <- "highhigh"
+    
+  } 
+}
+
+
+
+df_idvi_ua$usefulcontent<- NA
+i=0
+
+for (i in 1:(nrow(df_idvi_ua))) {
+  if (df_idvi_ua$content_category[i] == "SupportRequest") {
+    df_idvi_ua$usefulcontent[i] = 0
+  } else if (df_idvi_ua$content_category[i] == "BugReport") {
+    df_idvi_ua$usefulcontent[i] = 1
+  } else if (df_idvi_ua$content_category[i] == "FeatureRequest") {
+    df_idvi_ua$usefulcontent[i] = 1
+  } else if (df_idvi_ua$content_category[i] == "Other") {
+    df_idvi_ua$usefulcontent[i] = 0
+  }
+}
+
+df_idvi_ua
+
+```
+
+
+```{r}
+s1 <- data.frame(df_idvi_ua$culturegroup,df_idvi_ua$content_category )
+s2 <- data.frame(df_idvi_ua$culturegroup,df_idvi_ua$usefulcontent )
+library("vcd")
+assoc(s1, shade=TRUE)
+assoc(s2, shade=TRUE)
+```
+
+
+
+
+
+
+```{r}
+library(gmodels)
+#CrossTable(final_data_culture$sentiment, final_data_culture$PD)
+content_idvi_ua_tb <- table(df_idvi_ua$culturegroup,df_idvi_ua$content_category)
+content_idvi_ua_tb
+
+content_idvi_ua_tb_chi<- chisq.test(content_idvi_ua_tb)
+content_idvi_ua_tb_chi
+
+library(corrplot)
+#png(height=400, width=400, pointsize=15, file="corrplot-gender-circle.png")
+corrplot(content_idvi_ua_tb_chi$residuals, is.cor = FALSE, mar = c(0,0,1,0), tl.cex = 0.8, method="circle",type="full",cl.ratio = 0.2, cl.align = "r", cl.offset =  0.2, )
+```
+
+
+```{r}
+library(rcompanion)
+options(scipen = 9999)
+
+contnet_posthoc_1 <- pairwiseNominalIndependence(content_idvi_ua_tb,
+                            fisher = FALSE,
+                            gtest  = FALSE,
+                            chisq  = TRUE,
+                            method = "bonferroni")
+contnet_posthoc_1
+```
+
+
+### 
+
+```{r}
+df_5_dims <- final_data
+df_5_dims$culturegroup <- NA
+df_5_dims$PD1 <- NA
+df_5_dims$IDVI1 <- NA
+df_5_dims$MA1 <- NA
+df_5_dims$UA1 <- NA
+df_5_dims$LTO1 <- NA
+df_5_dims$INDU1 <- NA
+i=0
+
+for (i in 1:(nrow(df_5_dims))) {
+  if (df_5_dims[i,2] == "AU") {
+    df_5_dims$PD1[i] <- 38
+    df_5_dims$IDVI1[i] <- 90
+    df_5_dims$UA1[i] <- 51
+    df_5_dims$LTO1[i] <- 21
+    df_5_dims$INDU1[i] <- 71
+    df_5_dims$culturegroup[i] <- "low_high_high_low_high"
+    
+    
+  } else if (df_5_dims[i,2] == "CA" ) {
+    df_5_dims$PD1[i] <- 39
+    df_5_dims$IDVI1[i] <- 80
+    df_5_dims$UA1[i] <- 48
+    df_5_dims$LTO1[i] <- 36
+    df_5_dims$INDU1[i] <- 68
+    df_5_dims$culturegroup[i] <- "low_high_low_low_high"
+
+  } else if (df_5_dims[i,2] == "FR" ) {
+     df_5_dims$PD1[i] <- 68
+    df_5_dims$IDVI1[i] <- 71
+    df_5_dims$UA1[i] <- 86
+    df_5_dims$LTO1[i] <- 63
+    df_5_dims$INDU1[i] <- 48
+    df_5_dims$culturegroup[i] <- "high_high_high_high_low"
+
+  } else if (df_5_dims[i,2] == "DE" ) {
+     df_5_dims$PD1[i] <- 35
+    df_5_dims$IDVI1[i] <- 67
+    df_5_dims$UA1[i] <- 65
+    df_5_dims$LTO1[i] <- 83
+    df_5_dims$INDU1[i] <- 40
+    df_5_dims$culturegroup[i] <- "low_high_high_high_low"
+
+  } else if (df_5_dims[i,2] == "IN" ) {
+    df_5_dims$PD1[i] <- 77
+    df_5_dims$IDVI1[i] <- 48
+    df_5_dims$UA1[i] <- 40
+    df_5_dims$LTO1[i] <- 51
+    df_5_dims$INDU1[i] <- 26
+    df_5_dims$culturegroup[i] <- "high_low_low_high_low"
+
+  }  else if (df_5_dims[i,2] == "NL" ) {
+    df_5_dims$PD1[i] <- 38
+    df_5_dims$IDVI1[i] <- 80
+    df_5_dims$UA1[i] <- 53
+    df_5_dims$LTO1[i] <- 67
+    df_5_dims$INDU1[i] <- 68
+    df_5_dims$culturegroup[i] <- "low_high_high_high_high"
+
+  }  else if (df_5_dims[i,2] == "GB" ) {
+    df_5_dims$PD1[i] <- 35
+    df_5_dims$IDVI1[i] <- 89 
+    df_5_dims$UA1[i] <- 35
+    df_5_dims$LTO1[i] <- 51
+    df_5_dims$INDU1[i] <- 69
+    df_5_dims$culturegroup[i] <- "low_high_low_high_high"
+
+    
+  } else if (df_5_dims[i,2]== "US" ) {
+    df_5_dims$PD1[i] <- 40
+    df_5_dims$IDVI1[i] <- 91
+    df_5_dims$UA1[i] <- 46
+    df_5_dims$LTO1[i] <- 26
+    df_5_dims$INDU1[i] <- 68
+    df_5_dims$culturegroup[i] <- "low_high_low_low_high"
+  } 
+}
+
+df_5_dims
+```
+
+
+```{r}
+library(gmodels)
+#CrossTable(final_data_culture$sentiment, final_data_culture$PD)
+dim_tb <- table(df_5_dims$culturegroup,df_5_dims$content_category)
+dim_tb
+
+dim_tb_chi<- chisq.test(dim_tb)
+dim_tb_chi
+
+library(corrplot)
+#png(height=400, width=400, pointsize=15, file="corrplot-gender-circle.png")
+corrplot(dim_tb_chi$residuals, is.cor = FALSE, mar = c(0,0,1,0), tl.cex = 0.8, method="circle",type="full",cl.ratio = 0.5, cl.align = "r", cl.offset =  0.2, )
+```
+
+
+```{r}
+# Useful content
+
+df_5_dims$usefulcontent1<- NULL
+df_5_dims$usefulcontent<- NA
+i=0
+
+for (i in 1:(nrow(df_5_dims))) {
+  if (df_5_dims$content_category[i] == "SupportRequest") {
+    df_5_dims$usefulcontent[i] = 1
+  } else if (df_5_dims$content_category[i] == "BugReport") {
+    df_5_dims$usefulcontent[i] = 1
+  } else if (df_5_dims$content_category[i] == "FeatureRequest") {
+    df_5_dims$usefulcontent[i] = 1
+  } else if (df_5_dims$content_category[i] == "Other") {
+    df_5_dims$usefulcontent[i] = 0
+  }
+}
+
+df_5_dims
+```
+
+
+
+
+
+```{r}
+dim_tb_1 <- table(df_5_dims$culturegroup,df_5_dims$usefulcontent)
+dim_tb_1
+
+dim_tb_chi_1<- chisq.test(dim_tb_1)
+dim_tb_chi_1
+
+library(corrplot)
+#png(height=400, width=400, pointsize=15, file="corrplot-gender-circle.png")
+corrplot(dim_tb_chi_1$residuals, is.cor = FALSE, mar = c(0,0,1,0), tl.cex = 0.8, method="circle",type="full",cl.ratio = 0.5, cl.align = "r", cl.offset =  0.2, )
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+table(final_data_culture$sentiment)
+table(final_data_culture$gender)
+table(final_data_culture$content_category)
+table(final_data_culture$PD)
+```
+
+
+```{r}
+library(gmodels)
+#CrossTable(final_data_culture$sentiment, final_data_culture$PD)
+senti_pd <- table(final_data_culture$content_category, final_data_culture$IDVI1)
+senti_pd
+```
+
+
+
+```{r}
+chisq.test(senti_pd)
+```
+
+```{r}
+res2 <-cor.test(final_data_culture$sentiment, final_data_culture$PD1,  method = "spearman")
+res2
+```
+
+```{r}
+library("ggpubr")
+ggscatter(final_data_culture, x = "IDVI1", y = "content_category", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Miles/(US) gallon", ylab = "Weight (1000 lbs)") 
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+cramer_tb <- table(final_data_culture$content_category, final_data_culture$INDU)
+cramer_tb
+
+#n <-sum(cramer_tb)
+#q <- min(nrow(cramer_tb), ncol(cramer_tb))
+#chi2 <- unname(chisq.test(cramer_tb, correct = F)$statistic)
+
+library(lsr)
+cramersV(cramer_tb)
+```
+
+
+
+
+
+
+```{r}
+#data(final_data_culture, package="mosaicData")
+culture_lm <- lm(sentiment ~ PD1, 
+                data = final_data_culture)
+
+culture_lm
+```
+
+
+```{r}
+library(visreg)
+visreg(culture_lm, "PD1", gg = TRUE) +
+  # scale_y_continuous(label = scales::dollar) +
+  labs(title = "Relationship between price and location",
+       subtitle = "controlling for lot size, age, land value, bedrooms and bathrooms",
+       caption = "source: Saratoga Housing Data (2006)",
+       y = "Sentiment",
+       x = "PD")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

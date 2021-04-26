@@ -1,0 +1,423 @@
+```{r}
+library(mongolite)
+library(tidyverse)
+library(dplyr)
+library(irr)
+library(jsonlite)
+library(ggpubr)
+library(stringi)
+library(qdap)
+library(cld2)
+library(plyr)
+library(e1071)
+library(xlsx)
+library(PMCMRplus)
+```
+
+```{r}
+#import MongoDB collection into R
+db <- mongo(
+  collection = "final1",
+  db = "analysis",
+  url = "mongodb://localhost:27017/",
+  verbose = FALSE,
+  options = ssl_options()
+)
+
+#count observations
+db$count()
+```
+
+```{r}
+# put environment into proper dataset - makes it easy to get an overview of nested table
+df <- db$find('{}')
+
+#take a quick look into the dataset
+#glimpse(df)
+
+# Flatten table
+datacomplete <- df %>% flatten()
+
+
+#Remove noise
+datacomplete1<-datacomplete[!(datacomplete$finalannotationcontentcategory=="Noise"),]
+
+
+# select only important columns from full dataset and save into a new data frame
+# my_data <- as_tibble(datacomplete)
+final_data <- datacomplete1 %>% select(app_name, country_code, country, content_category = finalannotationcontentcategory, sentiment = finalannotationsentiment, gender = finalannotationgender, created_at, text = full_text)
+
+final_data
+```
+
+## Gender count per country ##
+```{r}
+gender_count <- ddply(final_data, .(final_data$gender, final_data$country), nrow)
+names(gender_count) <- c("gender", "country", "Freq")
+#gender_count
+
+gender_count <- spread(gender_count, "gender", Freq)
+
+gender_count <- gender_count %>%  bind_rows(summarise_all(., funs(if(is.numeric(.)) sum(.) else "Total")))
+gender_count$Total = apply(gender_count[,-1], 1, sum)
+gender_count
+```
+
+```{r}
+write.xlsx2(gender_count, 'gender.xlsx', sheetName = "Sheet1",
+  col.names = TRUE, row.names = TRUE, append = FALSE)
+```
+
+
+##calculate content category frequency per country##
+```{r}
+# (54/118) *100 = 45%
+
+#AU
+Genderau <- final_data %>% filter(country_code == "AU")
+relFreqGenderau <- prop.table(table(Genderau$gender))
+relFreqGenderau
+
+#CA
+Genderca <- final_data %>% filter(country_code == "CA")
+relFreqGenderca <- prop.table(table(Genderca$gender))
+relFreqGenderca
+
+#FR
+Genderfr <- final_data %>% filter(country_code == "FR")
+relFreqGenderfr <- prop.table(table(Genderfr$gender))
+relFreqGenderfr
+
+#DE
+Genderde <- final_data %>% filter(country_code == "DE")
+relFreqGenderde <- prop.table(table(Genderde$gender))
+relFreqGenderde
+
+#IN
+Genderin <- final_data %>% filter(country_code == "IN")
+relFreqGenderin <- prop.table(table(Genderin$gender))
+relFreqGenderin
+
+#NL
+Gendernl <- final_data %>% filter(country_code == "NL")
+relFreqGendernl <- prop.table(table(Gendernl$gender))
+relFreqGendernl
+
+#GB
+Gendergb <- final_data %>% filter(country_code == "GB")
+relFreqGendergb <- prop.table(table(Gendergb$gender))
+relFreqGendergb
+
+#US
+Genderus <- final_data %>% filter(country_code == "US")
+relFreqGenderus <- prop.table(table(Genderus$gender))
+relFreqGenderus
+
+#fre
+
+
+```
+
+
+## BarPlot ##
+```{r}
+mycolor <- c("#fbb4b9", "#fdcdac", "#a6cee3")
+
+#barchart for gender
+  ggplot(final_data) +
+  aes(x = country, fill = gender) +
+  geom_bar(position = "fill") + labs(y="Gender", x = "Countries") +
+  labs(title="Gender Percentage per Country", y="Gender (%)", x = "Countries" ) +
+  scale_fill_manual(values = alpha(c("#ff6384", "#76BFF1", "#FFDD8A"), .4))+
+    scale_y_continuous(labels = scales::percent) +
+  guides(x = guide_axis(angle = 90)) +theme_bw() 
+```
+
+
+```{r}
+gender_df <- final_data
+
+gender_df <- data.frame(final_data$country, final_data$gender)
+colnames(gender_df)<- c("country", "gender")
+
+gender_df <- gender_df %>% group_by(country, gender) %>%
+  add_count(country)  %>%
+  distinct()
+
+colnames(gender_df)<- c("country", "gender", "count")
+gender_df
+
+```
+
+```{r}
+
+p <- ggplot(data = gender_df, aes(x = country, 
+                          y=count, 
+                          fill = gender)) 
+p <- p + geom_bar(stat="identity",
+             position = "fill",
+             width = 0.6,
+             color = "#333333",
+             size = 0.3,
+             alpha = 0.4)+
+  theme_minimal()+
+  theme(legend.position = "right", axis.text.x = element_text(angle = 90, hjust = 0.8))+
+  labs(x="Country", y="Total Count", title = "Gender Count by Country") +
+  geom_text(aes(label=count), position = position_fill(vjust = 0.5), size=3) +
+  labs(fill = "gender")
+
+p
+
+```
+
+
+
+
+
+
+
+
+
+
+## Chi Square Test to check the null hypothesis
+### H0: Gender and selected Countries are independent of each other.
+### H1: Gender and selected Countries are not independent of each other.
+```{r}
+tb <- table(final_data$country, final_data$gender)
+tb
+chisq_gender <- chisq.test(tb)
+chisq_gender
+```
+
+```{r}
+round(chisq_gender$residuals,3)
+```
+
+
+```{r}
+library(corrplot)
+png(height=400, width=400, pointsize=15, file="corrplot-gender-circle.png")
+corrplot(chisq_gender$residuals, is.cor = FALSE, mar = c(0,0,1,0), tl.cex = 0.8, method="circle",type="full",cl.ratio = 0.8, cl.align = "r", cl.offset =  0.2, )
+
+```
+
+
+
+
+
+```{r}
+library(rcompanion)
+#options(scipen = 9999)
+
+gender_posthoc <- pairwiseNominalIndependence(tb,
+                            fisher = FALSE,
+                            gtest  = FALSE,
+                            chisq  = TRUE,
+                            method = "bonferroni")
+gender_posthoc
+```
+
+```{r}
+
+write.xlsx2(gender_posthoc, 'corrplot-gender.xlsx', sheetName = "Sheet1",
+  col.names = TRUE, row.names = TRUE, append = FALSE)
+```
+
+
+```{r}
+0.01159999999999999920	 < 0.05
+```
+
+
+
+
+
+## Poct hoc test for pairwise comparison
+```{r}
+library(chisq.posthoc.test)
+?chisq.posthoc.test
+chisq_gender <- chisq.posthoc.test(tb, method = "bonferroni")
+chisq_gender
+```
+
+
+
+
+
+# -------------------------------------------------------------------------------------------
+
+```{r}
+res <- Genderau <- chisq_gender %>% filter(Value == "Residuals")
+res_female <- res$female
+
+df_female <- data.frame(c("female"), c(res$female))
+colnames(df_female)<-  c("gender", "residuals")
+
+df_male <- data.frame(c("male"), c(res$male))
+colnames(df_male)<-  c("gender", "residuals")
+
+df_unknown <- data.frame(c("unknown"), c(res$unknown))
+colnames(df_unknown)<-  c("gender", "residuals")
+
+df_redisuals <- rbind(df_female, df_male, df_unknown)
+df_redisuals
+
+```
+
+```{r}
+res
+#res<- select (res,-c( Value))
+#res
+
+```
+
+
+
+
+
+
+```{r}
+class(res)
+M<- as.matrix(res)
+M <-  unname(M)
+
+M
+```
+
+
+
+```{r}
+sapply(res, class)
+sapply(res, is.factor)
+
+xx<- cor(res[sapply(res, function(x) !is.factor(x))])
+```
+
+
+```{r}
+M<-cor(res, use="pairwise.complete.obs")
+M
+```
+```{r}
+data("mtcars")
+my_data <- mtcars[, c(1,3,4,5,6,7)]
+#typeof(my_data)
+summary(my_data)
+#cor(my_data)
+```
+
+
+
+```{r}
+library(corrplot)
+par(xpd = TRUE)
+```
+
+```{r}
+?corrplot()
+```
+
+
+```{r}
+#Create a correlation plot for Pearson's residuals of gender and country
+corrplot(xx, is.cor = FALSE, mar = c(2,0,1,0), tl.cex = 0.8)
+```
+
+
+
+```{r}
+install.packages("RVAideMemoire")
+
+```
+
+```{r}
+library(RVAideMemoire) 
+chisq.multcomp(tb, p.method = "bonferroni")
+```
+
+
+
+
+
+
+```{r}
+tb
+M <- as.table(rbind(c(762, 327, 468), c(484, 239, 477)))
+M
+dimnames(M) <- list(gender = c("F", "M"),
+                   party = c("Democrat","Independent", "Republican"))
+
+# Pass data matrix to chisq.posthoc.test function
+chisq.posthoc.test(M)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+
+ggplot(data = final_data, aes(x = factor(country), y = prop.table(stat(count)), fill = factor(gender), label = scales::percent(prop.table(stat(count))))) +
+    geom_bar(position = "fill") + 
+    geom_text(stat = 'count',
+              position = position_dodge(.9), 
+              vjust = -0.5, 
+              size = 3) + 
+    scale_y_continuous(labels = scales::percent) + 
+    labs(x = 'cyl', y = 'pct', fill = 'gear')
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+ggplot(data = final_data, aes(x = factor(country), y = prop.table(stat(count)), fill = factor(gender), label = scales::percent(prop.table(stat(count))))) +
+    geom_bar(position = "dodge") + 
+    geom_text(stat = 'count',
+              position = position_dodge(.9), 
+              vjust = -0.5, 
+              size = 3) + 
+    scale_y_continuous(labels = scales::percent) + 
+    labs(x = 'cyl', y = 'pct', fill = 'gear')
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

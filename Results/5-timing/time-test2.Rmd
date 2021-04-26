@@ -1,0 +1,39 @@
+
+```{r}
+library(dplyr)
+library(magrittr)
+
+twitter_to_POSIXct <- function(x, timezone = Sys.timezone()){
+
+  x %>% 
+    strsplit("\\s+") %>% 
+    unlist %>% 
+    t %>% 
+    as.data.frame(stringsAsFactors = FALSE) %>% 
+    set_colnames(c("week_day", "month_abb", 
+                   "day", "hour", "tz", 
+                   "year")) %>%
+    mutate(month_num = which(month.abb %in% month_abb)) %>% 
+    mutate(date_str = paste0(year, "-", month_num, "-", day, " ", 
+                             hour)) %>% 
+    mutate(date = format(as.POSIXct(date_str, tz = tz), 
+                         tz = timezone)) %>%
+    pull(date)
+
+}
+
+twitter_to_POSIXct("Tue Jun 07 23:27:12 +0000 2016")
+```
+
+
+```{r}
+# Timestamp input example: Sun Feb 28 18:35:28 +0000
+tweets.date<- as.POSIXct("Tue Jun 07 23:27:12 +0000 2016", format = "%a %b %e %T %z %Y")
+
+```
+
+```{r}
+day.index = cut(tweets.date, breaks = "day")
+day.index
+```
+
